@@ -26,6 +26,9 @@ class MainWindow(QMainWindow):
         self.scraper_runner = ScraperRunner(self.profile_manager)
         self.version = "v0.01"
         self.totp_timers = {}  # Store TOTP update timers for each row
+        self.active_threads = {}  # Store active MexcAuthThread instances by profile name
+        self.login_queue = []  # Queue for sequential login processing
+        self.current_login_thread = None  # Currently running login thread
         self.init_ui()
 
     def init_ui(self):
@@ -555,6 +558,13 @@ class MainWindow(QMainWindow):
         else:
             self.delete_selected_btn.hide()
 
+    def get_selected_operation_mode(self):
+        """Get the currently selected operation mode"""
+        checked_button = self.operation_group.checkedButton()
+        if checked_button:
+            return checked_button.property("mode")
+        return None
+
     def delete_selected_profiles(self):
         """Delete all selected profiles"""
         selected_rows = self.get_selected_profile_rows()
@@ -668,40 +678,212 @@ class MainWindow(QMainWindow):
             self.log(f"❌ Import error: {str(e)}")
 
     def open_selected_profiles(self):
-        """Open selected profiles"""
+        """Open selected profiles based on operation mode"""
         selected_rows = self.get_selected_profile_rows()
 
         if not selected_rows:
             QMessageBox.warning(self, "No Selection", "Please select at least one profile")
             return
 
-        self.log(f"🚀 Opening {len(selected_rows)} selected profile(s)...")
+        # Get selected operation mode
+        operation_mode = self.get_selected_operation_mode()
 
-        # Placeholder - functionality to be implemented
+        if not operation_mode:
+            QMessageBox.warning(self, "No Mode Selected", "Please select an operation mode")
+            return
+
+        self.log(f"🚀 Starting operation: {operation_mode.upper()}")
+        self.log(f"📊 Selected {len(selected_rows)} profile(s)")
+
+        # Handle different operation modes
+        if operation_mode == "login":
+            self.run_mexc_login_for_selected(selected_rows)
+        elif operation_mode in ["short", "long", "balance", "rk"]:
+            self.log(f"⚠️ Mode '{operation_mode.upper()}' not implemented yet")
+            QMessageBox.information(
+                self,
+                "Coming Soon",
+                f"'{operation_mode.upper()}' mode will be implemented in future version"
+            )
+        else:
+            self.log(f"❌ Unknown mode: {operation_mode}")
+
+    def run_mexc_login_for_selected(self, selected_rows):
+        """Run MEXC login automation for selected profiles"""
+        self.log("🔐 Starting MEXC Login automation...")
+
+        # Clear the queue
+        self.login_queue = []
+
+        # Prepare queue with profile data
         for row in selected_rows:
             email_item = self.profiles_table.item(row, 1)
-            if email_item:
-                self.log(f"  • Opening profile: {email_item.text()}")
+            if not email_item:
+                continue
 
-        self.log("💡 Open functionality will be implemented in next version")
+            email = email_item.text()
+
+            # Find profile by email
+            profile_name = None
+            profiles = self.profile_manager.get_all_profiles()
+            for name in profiles:
+                info = self.profile_manager.get_profile_info(name)
+                if info and info.get('email') == email:
+                    profile_name = name
+                    break
+
+            if not profile_name:
+                self.log(f"❌ Profile not found for email: {email}")
+                continue
+
+            # Get profile info
+            profile_info = self.profile_manager.get_profile_info(profile_name)
+            if not profile_info:
+                self.log(f"❌ Failed to get profile info for: {email}")
+                continue
+
+            # Validate required fields
+            password = profile_info.get('password', '')
+            twofa_secret = profile_info.get('twofa_secret', '')
+
+            if not password:
+                self.log(f"❌ Missing password for: {email}")
+                self.update_profile_status(row, "Error: No password", "#f44336")
+                continue
+
+            if not twofa_secret:
+                self.log(f"❌ Missing 2FA secret for: {email}")
+                self.update_profile_status(row, "Error: No 2FA", "#f44336")
+                continue
+
+            # Add to queue
+            self.login_queue.append({
+                'profile_name': profile_name,
+                'email': email,
+                'password': password,
+                'twofa_secret': twofa_secret,
+                'row': row
+            })
+
+        # Start processing queue
+        if self.login_queue:
+            self.log(f"📋 Queue prepared: {len(self.login_queue)} profile(s)")
+            self.process_next_login()
+        else:
+            self.log("❌ No valid profiles to process")
+
+    def process_next_login(self):
+        """Process next profile in login queue"""
+        if not self.login_queue:
+            self.log("✅ All profiles processed")
+            self.current_login_thread = None
+            return
+
+        # Get next profile from queue
+        profile_data = self.login_queue.pop(0)
+
+        profile_name = profile_data['profile_name']
+        email = profile_data['email']
+        password = profile_data['password']
+        twofa_secret = profile_data['twofa_secret']
+        row = profile_data['row']
+
+        # Update status to "Logging in..."
+        self.update_profile_status(row, "Logging in...", "#2196f3")
+        self.log(f"▶️ Starting login for: {email} ({len(self.login_queue)} remaining)")
+
+        # Create and start MEXC Auth thread
+        thread = MexcAuthThread(
+            self.scraper_runner,
+            profile_name,
+            email,
+            password,
+            twofa_secret,
+            headless=False
+        )
+
+        # Store thread reference
+        self.current_login_thread = thread
+        self.active_threads[profile_name] = {
+            'thread': thread,
+            'row': row,
+            'email': email
+        }
+
+        # Connect signals
+        thread.log_signal.connect(self.log)
+        thread.captcha_signal.connect(lambda pn=profile_name: self.on_captcha_detected(pn))
+        thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_login_finished(success, result, pn))
+
+        # Start thread
+        thread.start()
+
+    def on_captcha_detected(self, profile_name):
+        """Handle captcha detection"""
+        thread_info = self.active_threads.get(profile_name)
+        if thread_info:
+            row = thread_info['row']
+            email = thread_info['email']
+
+            self.update_profile_status(row, "Captcha!", "#ff9800")
+
+            # Show message to user
+            QMessageBox.information(
+                self,
+                "Captcha Detected",
+                f"Captcha detected for {email}\n\n"
+                "Please solve the captcha in the browser window.\n"
+                "Click OK when you've solved it (10 second wait will start)."
+            )
+
+    def on_mexc_login_finished(self, success, result, profile_name):
+        """Handle MEXC login completion"""
+        thread_info = self.active_threads.get(profile_name)
+        if not thread_info:
+            return
+
+        row = thread_info['row']
+        email = thread_info['email']
+
+        if success:
+            self.log(f"✅ Login successful for: {email}")
+            self.update_profile_status(row, "Logged in", "#4caf50")
+        else:
+            self.log(f"❌ Login failed for: {email}")
+            self.log(f"   Error: {result}")
+            self.update_profile_status(row, "Login failed", "#f44336")
+
+        # Remove thread from active threads
+        del self.active_threads[profile_name]
+
+        # Process next profile in queue
+        self.process_next_login()
+
+    def update_profile_status(self, row, status_text, color):
+        """Update profile status in table"""
+        status_item = self.profiles_table.item(row, 4)
+        if status_item:
+            status_item.setText(status_text)
+            status_item.setForeground(QColor(color))
 
     def close_selected_profiles(self):
-        """Close selected profiles"""
+        """Close selected profiles (update status to Closed)"""
         selected_rows = self.get_selected_profile_rows()
 
         if not selected_rows:
             QMessageBox.warning(self, "No Selection", "Please select at least one profile")
             return
 
-        self.log(f"🛑 Closing {len(selected_rows)} selected profile(s)...")
+        self.log(f"🛑 Marking {len(selected_rows)} selected profile(s) as closed...")
 
-        # Placeholder - functionality to be implemented
+        # Update status for each selected profile
         for row in selected_rows:
             email_item = self.profiles_table.item(row, 1)
             if email_item:
-                self.log(f"  • Closing profile: {email_item.text()}")
+                self.update_profile_status(row, "Closed", "#ff9800")
+                self.log(f"  • Marked as closed: {email_item.text()}")
 
-        self.log("💡 Close functionality will be implemented in next version")
+        self.log("✅ Please manually close browser windows if needed")
 
     def clear_log(self):
         """Clear log output"""
