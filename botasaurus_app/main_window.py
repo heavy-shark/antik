@@ -662,24 +662,35 @@ Import Complete!
         try:
             import subprocess
             import sys
+            import os
 
-            # Build the command
-            cmd = [sys.executable, "-m", "playwright", "codegen"]
+            # Build the base command
+            base_cmd = f'"{sys.executable}" -m playwright codegen'
 
             # Add proxy if configured
             if proxy:
                 # Parse proxy for playwright format
                 proxy_formatted = self.scraper_runner.parse_proxy(proxy)
                 if proxy_formatted:
-                    cmd.extend(["--proxy-server", proxy_formatted])
+                    base_cmd += f' --proxy-server "{proxy_formatted}"'
                     self.log(f"✅ Using proxy: {proxy_formatted}")
 
             # Add URL
-            cmd.append(url)
+            base_cmd += f' "{url}"'
 
-            # Launch in background
             self.log("🚀 Launching Playwright Inspector...")
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
+            self.log(f"📝 Command: {base_cmd}")
+
+            # Launch based on OS
+            if sys.platform == 'win32':
+                # Windows: Use 'start' command to launch in new window that stays open
+                full_cmd = f'start "Playwright Inspector" cmd /k {base_cmd}'
+                subprocess.Popen(full_cmd, shell=True)
+            else:
+                # Mac/Linux: Launch normally
+                import shlex
+                cmd_parts = shlex.split(base_cmd)
+                subprocess.Popen(cmd_parts)
 
             self.log("✅ Playwright Inspector launched successfully!")
             self.log("💡 Instructions:")
@@ -693,12 +704,15 @@ Import Complete!
             self.statusBar().showMessage("Playwright Inspector launched")
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             QMessageBox.critical(
                 self,
                 "Launch Error",
                 f"Failed to launch Playwright Inspector:\n\n{str(e)}\n\nMake sure Playwright is installed:\npip install playwright\npython -m playwright install"
             )
             self.log(f"❌ Error: {str(e)}")
+            self.log(f"📋 Details: {error_details}")
             self.statusBar().showMessage("Failed to launch Inspector")
 
     def log(self, message):
