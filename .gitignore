@@ -33,9 +33,7 @@ env/
 
 # Botasaurus
 profiles/
-*.json
-!package.json
-botasaurus/
+settings.json
 
 # OS
 .DS_Store

@@ -1,0 +1,10 @@
+{
+    "extends": "@apify/tsconfig",
+    "compilerOptions": {
+        "allowJs": true,
+        "lib": ["ESNext", "DOM"],
+        "outDir": "dist",
+        "skipLibCheck": true
+    },
+    "include": ["./src/**/*"]
+}
