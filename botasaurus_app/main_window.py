@@ -101,13 +101,18 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_layout2)
 
-        # Buttons - Row 3 (Check Proxy)
+        # Buttons - Row 3 (Check Proxy & Record Actions)
         btn_layout3 = QHBoxLayout()
 
         check_proxy_btn = QPushButton("🔍 Check Proxy (whatismyip.com)")
         check_proxy_btn.clicked.connect(self.check_selected_profile_proxy)
         check_proxy_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 8px;")
         btn_layout3.addWidget(check_proxy_btn)
+
+        record_actions_btn = QPushButton("🎬 Record Actions (Playwright)")
+        record_actions_btn.clicked.connect(self.record_actions_for_profile)
+        record_actions_btn.setStyleSheet("background-color: #FF5722; color: white; font-weight: bold; padding: 8px;")
+        btn_layout3.addWidget(record_actions_btn)
 
         layout.addLayout(btn_layout3)
 
@@ -597,6 +602,104 @@ Import Complete!
         """Called after 5 second delay following proxy check"""
         self.log("✅ Proxy check complete!")
         self.log("💡 Browser window left open - close manually when done")
+
+    def record_actions_for_profile(self):
+        """Launch Playwright Inspector to record actions with profile's proxy"""
+        current_item = self.profile_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "Warning", "Please select a profile to record actions")
+            return
+
+        profile_name = current_item.text()
+
+        # Ask for URL to navigate to
+        url, ok = QInputDialog.getText(
+            self,
+            "Record Actions",
+            f"Enter URL to navigate and record actions:\n(Profile: {profile_name})",
+            text="https://www.whatismyip.com/"
+        )
+
+        if not ok or not url.strip():
+            return
+
+        # Get profile info
+        profile_info = self.profile_manager.get_profile_info(profile_name)
+        proxy = profile_info.get('proxy', '') if profile_info else ''
+
+        # Show confirmation
+        message = f"Launch Playwright Inspector for profile: {profile_name}\n\n"
+        message += f"URL: {url}\n"
+        if proxy:
+            message += f"Proxy: {proxy}\n\n"
+        else:
+            message += "Proxy: Not configured\n\n"
+        message += "This will:\n"
+        message += "1. Open Playwright Inspector\n"
+        message += "2. Open browser at the specified URL\n"
+        message += "3. Record all your actions (clicks, typing, etc.)\n"
+        message += "4. Generate Python code for the actions\n\n"
+        message += "Continue?"
+
+        reply = QMessageBox.question(
+            self,
+            "Record Actions",
+            message,
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Clear log
+        self.log_output.clear()
+        self.log(f"🎬 Launching Playwright Inspector for profile: {profile_name}")
+        self.log(f"🌐 URL: {url}")
+        if proxy:
+            self.log(f"🔒 Proxy: {proxy}")
+
+        # Launch Playwright Inspector
+        try:
+            import subprocess
+            import sys
+
+            # Build the command
+            cmd = [sys.executable, "-m", "playwright", "codegen"]
+
+            # Add proxy if configured
+            if proxy:
+                # Parse proxy for playwright format
+                proxy_formatted = self.scraper_runner.parse_proxy(proxy)
+                if proxy_formatted:
+                    cmd.extend(["--proxy-server", proxy_formatted])
+                    self.log(f"✅ Using proxy: {proxy_formatted}")
+
+            # Add URL
+            cmd.append(url)
+
+            # Launch in background
+            self.log("🚀 Launching Playwright Inspector...")
+            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
+
+            self.log("✅ Playwright Inspector launched successfully!")
+            self.log("💡 Instructions:")
+            self.log("   1. Browser window will open with Inspector panel")
+            self.log("   2. Click on elements to record actions")
+            self.log("   3. Inspector shows generated Python code")
+            self.log("   4. Copy the selectors from the Inspector")
+            self.log("   5. Use 'Pick Locator' (target icon) to find element selectors")
+            self.log("💡 Close the Inspector window when done")
+
+            self.statusBar().showMessage("Playwright Inspector launched")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Launch Error",
+                f"Failed to launch Playwright Inspector:\n\n{str(e)}\n\nMake sure Playwright is installed:\npip install playwright\npython -m playwright install"
+            )
+            self.log(f"❌ Error: {str(e)}")
+            self.statusBar().showMessage("Failed to launch Inspector")
 
     def log(self, message):
         """Add message to log output"""
