@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
-from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread
+from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread
 import json
 import time
 
@@ -115,6 +115,16 @@ class MainWindow(QMainWindow):
         btn_layout3.addWidget(record_actions_btn)
 
         layout.addLayout(btn_layout3)
+
+        # Row 4: MEXC Auth button
+        btn_layout4 = QHBoxLayout()
+
+        mexc_auth_btn = QPushButton("🔐 MEXC Auth (Login)")
+        mexc_auth_btn.clicked.connect(self.mexc_auth_for_profile)
+        mexc_auth_btn.setStyleSheet("background-color: #9C27B0; color: white; font-weight: bold; padding: 8px;")
+        btn_layout4.addWidget(mexc_auth_btn)
+
+        layout.addLayout(btn_layout4)
 
         # Profile details
         self.profile_details = QTextEdit()
@@ -604,10 +614,10 @@ Import Complete!
         self.log("💡 Browser window left open - close manually when done")
 
     def record_actions_for_profile(self):
-        """Launch Playwright Inspector to record actions with profile's proxy"""
+        """Launch YOUR real Chrome browser with YOUR Chrome profile for element inspection"""
         current_item = self.profile_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select a profile to record actions")
+            QMessageBox.warning(self, "Warning", "Please select a profile to inspect elements")
             return
 
         profile_name = current_item.text()
@@ -615,35 +625,53 @@ Import Complete!
         # Ask for URL to navigate to
         url, ok = QInputDialog.getText(
             self,
-            "Record Actions",
-            f"Enter URL to navigate and record actions:\n(Profile: {profile_name})",
+            "Inspect Elements",
+            f"Enter URL to navigate and inspect elements:\n(Botasaurus Profile: {profile_name})",
             text="https://www.whatismyip.com/"
         )
 
         if not ok or not url.strip():
             return
 
-        # Get profile info
-        profile_info = self.profile_manager.get_profile_info(profile_name)
-        proxy = profile_info.get('proxy', '') if profile_info else ''
+        # Ask for Chrome profile name (optional)
+        chrome_profile, ok = QInputDialog.getText(
+            self,
+            "Chrome Profile",
+            "Enter Chrome profile directory name:\n\n"
+            "Common profiles:\n"
+            "• 'Default' - first/main profile\n"
+            "• 'Profile 1' - second profile\n"
+            "• 'Profile 2' - third profile\n\n"
+            "To find your profile: open Chrome → chrome://version/\n"
+            "Look at 'Profile Path' line",
+            text="Profile 1"
+        )
+
+        if not ok:
+            return
 
         # Show confirmation
-        message = f"Launch Playwright Inspector for profile: {profile_name}\n\n"
+        message = f"Launch YOUR real Chrome browser\n\n"
         message += f"URL: {url}\n"
-        if proxy:
-            message += f"Proxy: {proxy}\n\n"
+        if chrome_profile.strip():
+            message += f"Chrome Profile: {chrome_profile}\n"
         else:
-            message += "Proxy: Not configured\n\n"
+            message += f"Chrome Profile: Default\n"
+        message += "\n"
         message += "This will:\n"
-        message += "1. Open Playwright Inspector\n"
-        message += "2. Open browser at the specified URL\n"
-        message += "3. Record all your actions (clicks, typing, etc.)\n"
-        message += "4. Generate Python code for the actions\n\n"
+        message += "1. Open YOUR real Chrome browser\n"
+        message += "2. Load YOUR Chrome profile (cookies, logins, history)\n"
+        message += "3. Navigate to the URL\n"
+        message += "4. Enable Remote Debugging\n"
+        message += "5. You use F12 DevTools to inspect elements\n\n"
+        message += "✅ Real Chrome + Your profile = NO DETECTION!\n"
+        message += "✅ Captchas WILL work!\n"
+        message += "✅ Your cookies already loaded!\n\n"
         message += "Continue?"
 
         reply = QMessageBox.question(
             self,
-            "Record Actions",
+            "Launch Chrome",
             message,
             QMessageBox.Yes | QMessageBox.No
         )
@@ -653,67 +681,223 @@ Import Complete!
 
         # Clear log
         self.log_output.clear()
-        self.log(f"🎬 Launching Playwright Inspector for profile: {profile_name}")
+        self.log(f"🎬 Launching YOUR real Chrome browser")
         self.log(f"🌐 URL: {url}")
-        if proxy:
-            self.log(f"🔒 Proxy: {proxy}")
+        if chrome_profile.strip():
+            self.log(f"👤 Chrome Profile: {chrome_profile}")
+        else:
+            self.log(f"👤 Chrome Profile: Default")
 
-        # Launch Playwright Inspector
+        # Launch real Chrome browser with user's profile
         try:
             import subprocess
             import sys
             import os
 
-            # Build the base command
-            base_cmd = f'"{sys.executable}" -m playwright codegen'
+            # Find Chrome executable
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            ]
 
-            # Add proxy if configured
-            if proxy:
-                # Parse proxy for playwright format
-                proxy_formatted = self.scraper_runner.parse_proxy(proxy)
-                if proxy_formatted:
-                    base_cmd += f' --proxy-server "{proxy_formatted}"'
-                    self.log(f"✅ Using proxy: {proxy_formatted}")
+            chrome_exe = None
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_exe = path
+                    break
+
+            if not chrome_exe:
+                raise FileNotFoundError("Chrome browser not found! Please install Google Chrome.")
+
+            self.log(f"✅ Found Chrome: {chrome_exe}")
+
+            # Build Chrome command
+            cmd_parts = [chrome_exe]
+
+            # Add profile directory
+            if chrome_profile.strip():
+                cmd_parts.append(f'--profile-directory={chrome_profile.strip()}')
+                self.log(f"✅ Using profile: {chrome_profile.strip()}")
+            else:
+                self.log(f"✅ Using Default profile")
+
+            # Add remote debugging for DevTools access
+            cmd_parts.append("--remote-debugging-port=9222")
+
+            # Add new window flag
+            cmd_parts.append("--new-window")
 
             # Add URL
-            base_cmd += f' "{url}"'
+            cmd_parts.append(url)
 
-            self.log("🚀 Launching Playwright Inspector...")
-            self.log(f"📝 Command: {base_cmd}")
+            self.log("🚀 Launching YOUR real Chrome browser...")
+            self.log(f"📝 Command: {' '.join(cmd_parts)}")
 
-            # Launch based on OS
-            if sys.platform == 'win32':
-                # Windows: Use 'start' command to launch in new window that stays open
-                full_cmd = f'start "Playwright Inspector" cmd /k {base_cmd}'
-                subprocess.Popen(full_cmd, shell=True)
-            else:
-                # Mac/Linux: Launch normally
-                import shlex
-                cmd_parts = shlex.split(base_cmd)
-                subprocess.Popen(cmd_parts)
+            # Launch Chrome directly
+            subprocess.Popen(cmd_parts)
 
-            self.log("✅ Playwright Inspector launched successfully!")
-            self.log("💡 Instructions:")
-            self.log("   1. Browser window will open with Inspector panel")
-            self.log("   2. Click on elements to record actions")
-            self.log("   3. Inspector shows generated Python code")
-            self.log("   4. Copy the selectors from the Inspector")
-            self.log("   5. Use 'Pick Locator' (target icon) to find element selectors")
-            self.log("💡 Close the Inspector window when done")
+            self.log("✅ Chrome browser launched successfully!")
+            self.log("")
+            self.log("💡 How to inspect elements:")
+            self.log("   1. Chrome opened with YOUR profile (cookies loaded!)")
+            self.log("   2. Press F12 to open Chrome DevTools")
+            self.log("   3. Click 'Elements' tab")
+            self.log("   4. Click the 'Select element' icon (Ctrl+Shift+C)")
+            self.log("   5. Click on any element on the page")
+            self.log("   6. Right-click in HTML → Copy → Copy selector")
+            self.log("")
+            self.log("🎯 Alternative methods to get selectors:")
+            self.log("   • Copy CSS selector")
+            self.log("   • Copy XPath")
+            self.log("   • Copy JS path")
+            self.log("")
+            self.log("🛡️ Using YOUR real Chrome profile:")
+            self.log("   ✅ Your cookies are loaded")
+            self.log("   ✅ Your logins are available")
+            self.log("   ✅ Captchas WILL work!")
+            self.log("   ✅ No automation detection!")
+            self.log("")
+            self.log("💡 Remote debugging enabled on port 9222")
+            self.log("💡 Close the browser window when done")
 
-            self.statusBar().showMessage("Playwright Inspector launched")
+            self.statusBar().showMessage("Chrome browser launched with your profile")
 
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
+
             QMessageBox.critical(
                 self,
                 "Launch Error",
-                f"Failed to launch Playwright Inspector:\n\n{str(e)}\n\nMake sure Playwright is installed:\npip install playwright\npython -m playwright install"
+                f"Failed to launch Chrome browser:\n\n{str(e)}\n\n"
+                f"Make sure:\n"
+                f"1. Google Chrome is installed\n"
+                f"2. Chrome profile name is correct\n"
+                f"   (Check chrome://version/ in Chrome to see profile path)"
             )
             self.log(f"❌ Error: {str(e)}")
             self.log(f"📋 Details: {error_details}")
-            self.statusBar().showMessage("Failed to launch Inspector")
+            self.statusBar().showMessage("Failed to launch Chrome")
+
+    def mexc_auth_for_profile(self):
+        """Perform MEXC login automation with Botasaurus"""
+        current_item = self.profile_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "Warning", "Please select a profile for MEXC login")
+            return
+
+        profile_name = current_item.text()
+
+        # Get profile info to get credentials from Excel
+        profile_info = self.profile_manager.get_profile_info(profile_name)
+
+        if not profile_info:
+            QMessageBox.warning(self, "Warning", f"Profile {profile_name} not found!")
+            return
+
+        # Get credentials from profile
+        email = profile_info.get('email', '').strip()
+        password = profile_info.get('password', '').strip()
+        secret = profile_info.get('twofa_secret', '').strip()  # Saved as 'twofa_secret' in profile dict
+
+        # Check if all required fields are present
+        if not email:
+            QMessageBox.warning(
+                self,
+                "Missing Email",
+                f"Profile {profile_name} doesn't have Email configured!\n\n"
+                "Please add Email in Excel file."
+            )
+            return
+
+        if not password:
+            QMessageBox.warning(
+                self,
+                "Missing Password",
+                f"Profile {profile_name} doesn't have Password configured!\n\n"
+                "Please add Password in Excel file."
+            )
+            return
+
+        if not secret:
+            QMessageBox.warning(
+                self,
+                "Missing 2FA Secret",
+                f"Profile {profile_name} doesn't have 2FA Secret configured!\n\n"
+                "Please add 2FA Secret in Excel file (column: 2fa_secret)."
+            )
+            return
+
+        # Show confirmation
+        message = f"Start MEXC login for profile: {profile_name}\n\n"
+        message += f"📧 Email: {email}\n"
+        message += f"🔑 Password: {'*' * len(password)}\n"
+        message += f"🔐 2FA Secret: {'*' * len(secret)}\n"
+        message += f"(Loaded from Excel)\n\n"
+        message += "This will:\n"
+        message += "1. Navigate to MEXC login page\n"
+        message += "2. Enter email and password\n"
+        message += "3. Handle captcha (you will be prompted)\n"
+        message += "4. Generate and enter 2FA code automatically\n"
+        message += "5. Complete login\n\n"
+        message += "✅ Using Botasaurus anti-detection browser\n"
+        message += "✅ Using profile's proxy (if configured)\n\n"
+        message += "Continue?"
+
+        reply = QMessageBox.question(
+            self,
+            "MEXC Login",
+            message,
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Clear log
+        self.log_output.clear()
+        self.log(f"🔐 Starting MEXC login for profile: {profile_name}")
+        self.log(f"📧 Email: {email}")
+        self.log(f"🔑 Password: {'*' * len(password)}")
+        self.log(f"🔐 2FA Secret: {'*' * len(secret)}")
+        self.log(f"✅ Credentials loaded from Excel profile")
+
+        # Launch MEXC auth in thread
+        self.mexc_thread = MexcAuthThread(
+            self.scraper_runner,
+            profile_name,
+            email,
+            password,
+            secret,
+            headless=False
+        )
+
+        self.mexc_thread.log_signal.connect(self.log)
+        self.mexc_thread.captcha_signal.connect(self.on_mexc_captcha)
+        self.mexc_thread.finished.connect(self.on_mexc_finished)
+        self.mexc_thread.start()
+
+        self.statusBar().showMessage(f"MEXC login started for {profile_name}...")
+
+    def on_mexc_captcha(self):
+        """Handle captcha detection - pause and wait for user"""
+        QMessageBox.warning(
+            self,
+            "Captcha Detected",
+            "⚠️ Пройдите капчу в браузере!\n\n"
+            "Нажмите OK после того как пройдете капчу.\n"
+            "Скрипт подождет 10 секунд и продолжит работу."
+        )
+
+    def on_mexc_finished(self, success, result):
+        """Handle MEXC auth completion"""
+        if success:
+            self.statusBar().showMessage("MEXC login completed successfully")
+            self.log("✅ MEXC login completed!")
+        else:
+            self.statusBar().showMessage("MEXC login failed")
+            self.log(f"❌ Error: {result}")
 
     def log(self, message):
         """Add message to log output"""

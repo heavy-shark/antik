@@ -396,3 +396,279 @@ class CheckProxyThread(QThread):
             error_msg = f"Thread error: {str(e)}\n{traceback.format_exc()}"
             self.log_signal.emit(f"❌ Error: {str(e)}")
             self.finished.emit(False, error_msg)
+
+
+class InspectElementsThread(QThread):
+    """Thread for launching browser with DevTools for element inspection"""
+    finished = Signal(bool, object)  # success, result/error
+    log_signal = Signal(str)
+
+    def __init__(self, scraper_runner, profile_name, url, headless=False):
+        super().__init__()
+        self.scraper_runner = scraper_runner
+        self.profile_name = profile_name
+        self.url = url
+        self.headless = headless
+
+    def run(self):
+        """Launch browser for element inspection"""
+        try:
+            # Fix URL and log it
+            fixed_url = self.scraper_runner.fix_url(self.url)
+            if fixed_url != self.url:
+                self.log_signal.emit(f"🔧 Auto-fixed URL: {self.url} → {fixed_url}")
+
+            # Get proxy info for this profile
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+            if proxy:
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+            else:
+                self.log_signal.emit(f"🌐 No proxy configured (direct connection)")
+
+            self.log_signal.emit("🔧 Initializing anti-detection browser...")
+
+            # Update last used timestamp
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver configuration
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            # Add proxy if configured
+            if proxy:
+                driver_config['proxy'] = proxy
+
+            # Create driver with profile and proxy
+            driver = Driver(**driver_config)
+
+            # Navigate to URL
+            self.log_signal.emit(f"🌐 Navigating to {fixed_url}...")
+            driver.get(fixed_url)
+
+            # Wait for page to load
+            driver.sleep(2)
+
+            self.log_signal.emit("✅ Browser launched successfully!")
+            self.log_signal.emit("")
+            self.log_signal.emit("💡 How to inspect elements:")
+            self.log_signal.emit("   1. Press F12 to open Chrome DevTools")
+            self.log_signal.emit("   2. Click the 'Select element' icon (top-left of DevTools)")
+            self.log_signal.emit("   3. Hover over elements to see their selectors")
+            self.log_signal.emit("   4. Click on an element to inspect it")
+            self.log_signal.emit("   5. Copy selectors from the Elements tab")
+            self.log_signal.emit("")
+            self.log_signal.emit("🛡️ Anti-detection enabled - captchas will work!")
+            self.log_signal.emit("💡 Browser window left open - close manually when done")
+
+            result = {
+                "url": fixed_url,
+                "proxy_used": proxy_display if proxy else "No proxy"
+            }
+
+            self.finished.emit(True, result)
+
+            # Keep browser open - user will close manually
+            # driver.quit() - NOT called
+
+        except Exception as e:
+            error_msg = f"Thread error: {str(e)}\n{traceback.format_exc()}"
+            self.log_signal.emit(f"❌ Error: {str(e)}")
+            self.finished.emit(False, error_msg)
+
+
+class MexcAuthThread(QThread):
+    """Thread for MEXC login automation"""
+    finished = Signal(bool, object)  # success, result/error
+    log_signal = Signal(str)
+    captcha_signal = Signal()  # Signal when captcha detected
+
+    def __init__(self, scraper_runner, profile_name, email, password, secret, headless=False):
+        super().__init__()
+        self.scraper_runner = scraper_runner
+        self.profile_name = profile_name
+        self.email = email
+        self.password = password
+        self.secret = secret
+        self.headless = headless
+
+    def run(self):
+        """Run MEXC login automation"""
+        try:
+            self.log_signal.emit("🔐 Starting MEXC login automation...")
+
+            # Get proxy info for this profile
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+            if proxy:
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+            else:
+                self.log_signal.emit(f"🌐 No proxy configured (direct connection)")
+
+            self.log_signal.emit("🔧 Initializing anti-detection browser...")
+
+            # Update last used timestamp
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver configuration
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            # Add proxy if configured
+            if proxy:
+                driver_config['proxy'] = proxy
+
+            # Create driver with profile and proxy
+            driver = Driver(**driver_config)
+
+            # Navigate to MEXC login page
+            login_url = "https://www.mexc.com/ru-RU/login?previous=%2Fru-RU%2F"
+            self.log_signal.emit(f"🌐 Navigating to MEXC login page...")
+            driver.get(login_url)
+
+            # Wait for page to load
+            driver.sleep(3)
+
+            # Step 1: Enter email
+            self.log_signal.emit("📧 Entering email...")
+            try:
+                email_field = driver.select("#emailInputwwwmexccom", wait=5)
+                email_field.click()
+                driver.sleep(0.5)
+                email_field.type(self.email)
+                self.log_signal.emit(f"✅ Email entered: {self.email}")
+            except Exception as e:
+                raise Exception(f"Email field not found: {e}")
+
+            driver.sleep(1)
+
+            # Step 2: Click switcher
+            self.log_signal.emit("🔘 Clicking switcher...")
+            try:
+                switcher = driver.select(".ant-switch-handle", wait=3)
+                switcher.click()
+                self.log_signal.emit("✅ Switcher clicked")
+            except:
+                self.log_signal.emit("⚠️ Switcher not found, skipping...")
+
+            driver.sleep(1)
+
+            # Step 3: Click "Next" button
+            self.log_signal.emit("➡️ Clicking 'Next' button...")
+            try:
+                # Find submit button (should be "Далее" button)
+                next_button = driver.select("button[type='submit'].ant-btn-v2-primary", wait=3)
+                next_button.click()
+                self.log_signal.emit("✅ 'Next' clicked")
+            except Exception as e:
+                self.log_signal.emit(f"⚠️ Error finding Next button: {e}")
+                raise Exception("'Next' button not found")
+
+            driver.sleep(3)
+
+            # Step 4: Check for captcha
+            self.log_signal.emit("🔍 Checking for captcha...")
+            try:
+                captcha_element = driver.select(".geetest_text_tips", wait=2)
+                if captcha_element:
+                    self.log_signal.emit("⚠️ Captcha detected!")
+                    self.log_signal.emit("⏸️ Waiting for user to solve captcha...")
+
+                    # Emit signal to show dialog to user
+                    self.captcha_signal.emit()
+
+                    # Wait 10 seconds after user clicks OK
+                    self.log_signal.emit("⏳ Waiting 10 seconds...")
+                    driver.sleep(10)
+                    self.log_signal.emit("✅ Continuing after captcha...")
+            except:
+                self.log_signal.emit("✅ No captcha detected")
+
+            # Step 5: Enter password
+            self.log_signal.emit("🔑 Entering password...")
+            try:
+                password_field = driver.select("#passwordInput", wait=5)
+                password_field.click()
+                driver.sleep(0.5)
+                password_field.type(self.password)
+                self.log_signal.emit("✅ Password entered")
+            except Exception as e:
+                raise Exception(f"Password field not found: {e}")
+
+            driver.sleep(3)
+
+            # Step 6: Click "Login" button
+            self.log_signal.emit("🔓 Clicking 'Login' button...")
+            try:
+                # Find submit button (should be "Войти" button)
+                login_button = driver.select("button[type='submit'].ant-btn-v2-primary", wait=3)
+                login_button.click()
+                self.log_signal.emit("✅ 'Login' clicked")
+            except Exception as e:
+                self.log_signal.emit(f"⚠️ Error finding Login button: {e}")
+                raise Exception("'Login' button not found")
+
+            driver.sleep(5)
+
+            # Step 7: Click switcher again
+            self.log_signal.emit("🔘 Clicking switcher (2nd time)...")
+            try:
+                switcher2 = driver.select(".ant-switch-handle", wait=3)
+                switcher2.click()
+                self.log_signal.emit("✅ Switcher clicked")
+            except:
+                self.log_signal.emit("⚠️ Switcher not found, skipping...")
+
+            driver.sleep(1)
+
+            # Step 8: Generate and enter 2FA code
+            self.log_signal.emit("🔐 Generating 2FA code...")
+            import pyotp
+            totp = pyotp.TOTP(self.secret)
+            code_2fa = totp.now()
+            self.log_signal.emit(f"✅ 2FA code generated: {code_2fa}")
+
+            self.log_signal.emit("🔢 Entering 2FA code...")
+            try:
+                code_field = driver.select('input[data-id="0"]', wait=5)
+                code_field.click()
+                driver.sleep(0.5)
+                code_field.type(code_2fa)
+                self.log_signal.emit("✅ 2FA code entered")
+            except Exception as e:
+                raise Exception(f"2FA code field not found: {e}")
+
+            driver.sleep(5)
+
+            # Step 9: Click "OK" button
+            self.log_signal.emit("✅ Clicking 'OK' button...")
+            try:
+                # Find button type="button" (should be "ОК" button)
+                ok_button = driver.select("button[type='button'].ant-btn-v2-primary", wait=3)
+                ok_button.click()
+                self.log_signal.emit("✅ 'OK' clicked")
+            except Exception as e:
+                self.log_signal.emit(f"⚠️ Error finding OK button: {e}")
+                raise Exception("'OK' button not found")
+
+            driver.sleep(15)
+
+            self.log_signal.emit("🎉 MEXC login completed successfully!")
+            self.log_signal.emit("💡 Browser window left open - close manually when done")
+
+            result = {
+                "email": self.email,
+                "status": "logged_in"
+            }
+
+            self.finished.emit(True, result)
+
+            # Keep browser open - user will close manually
+            # driver.quit() - NOT called
+
+        except Exception as e:
+            error_msg = f"MEXC Auth error: {str(e)}\n{traceback.format_exc()}"
+            self.log_signal.emit(f"❌ Error: {str(e)}")
+            self.finished.emit(False, error_msg)
