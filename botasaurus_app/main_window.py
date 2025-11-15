@@ -1,345 +1,625 @@
 """
-Main Window for Botasaurus Desktop App
+Hysk Mexc Futures - Main Window
+Dark blue theme UI inspired by NaVI Blue design
 """
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QPushButton, QLabel, QLineEdit,
-    QTextEdit, QListWidget, QMessageBox, QInputDialog,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QGroupBox, QComboBox, QFileDialog
+    QPushButton, QLabel, QTextEdit, QTableWidget,
+    QTableWidgetItem, QHeaderView, QCheckBox, QRadioButton,
+    QButtonGroup, QMessageBox, QFileDialog, QFrame
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
 from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread
 import json
+import pyotp
 import time
 
 
 class MainWindow(QMainWindow):
+    """Main application window with dark blue theme"""
+
     def __init__(self):
         super().__init__()
         self.profile_manager = ProfileManager()
         self.scraper_runner = ScraperRunner(self.profile_manager)
+        self.version = "v0.01"
+        self.totp_timers = {}  # Store TOTP update timers for each row
         self.init_ui()
 
     def init_ui(self):
-        """Initialize the user interface"""
-        self.setWindowTitle("Botasaurus - Browser Automation & Profiles")
-        self.setGeometry(100, 100, 1200, 800)
+        """Initialize the user interface with dark blue theme"""
+        self.setWindowTitle(f"Hysk Mexc Futures {self.version}")
+        self.setGeometry(100, 100, 1400, 900)
 
-        # Create central widget and layout
+        # Apply dark blue theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #0a1929;
+            }
+            QWidget {
+                background-color: #0a1929;
+                color: #ffffff;
+                font-family: 'Segoe UI', Arial;
+                font-size: 12px;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 10px 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+            QPushButton:pressed {
+                background-color: #0d47a1;
+            }
+            QPushButton#settingsBtn {
+                background-color: #1e3a5f;
+                padding: 8px 16px;
+            }
+            QPushButton#settingsBtn:hover {
+                background-color: #2d4a6f;
+            }
+            QPushButton#importBtn {
+                background-color: #1976d2;
+            }
+            QPushButton#openSelectedBtn {
+                background-color: #1976d2;
+            }
+            QPushButton#closeSelectedBtn {
+                background-color: #455a64;
+            }
+            QPushButton#closeSelectedBtn:hover {
+                background-color: #546e7a;
+            }
+            QPushButton#clearLogBtn {
+                background-color: #1e3a5f;
+                padding: 6px 12px;
+                font-size: 11px;
+            }
+            QTableWidget {
+                background-color: #0d1b2a;
+                border: 1px solid #1e3a5f;
+                gridline-color: #1e3a5f;
+                color: #ffffff;
+            }
+            QTableWidget QWidget {
+                background-color: #0d1b2a;
+            }
+            QTableWidget::item {
+                padding: 12px 8px;
+                border-bottom: 1px solid #1e3a5f;
+                height: 40px;
+            }
+            QTableWidget::item:selected {
+                background-color: #1e3a5f;
+            }
+            QHeaderView::section {
+                background-color: #0d1b2a;
+                color: #64b5f6;
+                padding: 10px;
+                border: none;
+                border-bottom: 2px solid #1e3a5f;
+                border-right: 1px solid #1e3a5f;
+                font-weight: bold;
+            }
+            QTextEdit {
+                background-color: #0d1b2a;
+                border: 1px solid #1e3a5f;
+                color: #4caf50;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+            }
+            QRadioButton {
+                color: #ffffff;
+                spacing: 8px;
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #1976d2;
+                border-radius: 10px;
+                background-color: #0d1b2a;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #1976d2;
+                border: 2px solid #64b5f6;
+            }
+            QRadioButton::indicator:hover {
+                border: 2px solid #64b5f6;
+            }
+            QCheckBox {
+                spacing: 5px;
+                background: none;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #1976d2;
+                border-radius: 8px;
+                background-color: rgba(0, 0, 0, 0);
+            }
+            QCheckBox::indicator:unchecked {
+                background-color: rgba(0, 0, 0, 0);
+                background: none;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #1976d2;
+                border: 2px solid #1976d2;
+            }
+            QCheckBox::indicator:unchecked:hover {
+                background-color: rgba(0, 0, 0, 0);
+                border: 2px solid #64b5f6;
+            }
+            QCheckBox::indicator:checked:hover {
+                background-color: #1976d2;
+                border: 2px solid #64b5f6;
+            }
+            QFrame#separator {
+                background-color: #1e3a5f;
+            }
+        """)
+
+        # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Header
-        header = QLabel("🤖 Botasaurus Desktop App")
-        header_font = QFont()
-        header_font.setPointSize(16)
-        header_font.setBold(True)
-        header.setFont(header_font)
-        header.setAlignment(Qt.AlignCenter)
-        layout.addWidget(header)
+        # === HEADER ===
+        header_widget = self.create_header()
+        main_layout.addWidget(header_widget)
 
-        # Create tabs
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.create_profiles_tab(), "📁 Profiles")
-        self.tabs.addTab(self.create_scraper_tab(), "🚀 Run Scraper")
-        self.tabs.addTab(self.create_results_tab(), "📊 Results")
+        # Content area with padding
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(20)
 
-        layout.addWidget(self.tabs)
+        # === PROFILES SECTION ===
+        profiles_section = self.create_profiles_section()
+        content_layout.addWidget(profiles_section)
 
-        # Status bar
-        self.statusBar().showMessage("Ready")
+        # === OPERATION MODE SECTION ===
+        operation_section = self.create_operation_mode_section()
+        content_layout.addWidget(operation_section)
 
-    def create_profiles_tab(self):
-        """Create the profiles management tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        # === LOGS SECTION ===
+        logs_section = self.create_logs_section()
+        content_layout.addWidget(logs_section)
 
-        # Header
-        header = QLabel("Manage Browser Profiles")
-        header_font = QFont()
-        header_font.setPointSize(12)
-        header_font.setBold(True)
-        header.setFont(header_font)
-        layout.addWidget(header)
+        main_layout.addWidget(content_widget)
 
-        # Profile list
-        list_label = QLabel("Available Profiles:")
-        layout.addWidget(list_label)
+        # Load profiles into table
+        self.refresh_profiles_table()
 
-        self.profile_list = QListWidget()
-        self.refresh_profile_list()
-        layout.addWidget(self.profile_list)
+    def create_header(self):
+        """Create header with title and settings button"""
+        header = QWidget()
+        header.setFixedHeight(60)
+        header.setStyleSheet("background-color: #0d1b2a; border-bottom: 2px solid #1e3a5f;")
 
-        # Buttons - Row 1
-        btn_layout1 = QHBoxLayout()
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(20, 0, 20, 0)
 
-        create_btn = QPushButton("➕ Create New Profile")
-        create_btn.clicked.connect(self.create_new_profile)
-        btn_layout1.addWidget(create_btn)
+        # Title
+        title = QLabel(f"Hysk Mexc Futures {self.version}")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #64b5f6;")
 
-        delete_btn = QPushButton("🗑️ Delete Selected Profile")
-        delete_btn.clicked.connect(self.delete_selected_profile)
-        btn_layout1.addWidget(delete_btn)
-
-        info_btn = QPushButton("ℹ️ Profile Info")
-        info_btn.clicked.connect(self.show_profile_info)
-        btn_layout1.addWidget(info_btn)
-
-        layout.addLayout(btn_layout1)
-
-        # Buttons - Row 2 (Import)
-        btn_layout2 = QHBoxLayout()
-
-        import_btn = QPushButton("📥 Import Profiles from Excel")
-        import_btn.clicked.connect(self.import_profiles_from_excel)
-        import_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
-        btn_layout2.addWidget(import_btn)
-
-        layout.addLayout(btn_layout2)
-
-        # Buttons - Row 3 (Check Proxy & Record Actions)
-        btn_layout3 = QHBoxLayout()
-
-        check_proxy_btn = QPushButton("🔍 Check Proxy (whatismyip.com)")
-        check_proxy_btn.clicked.connect(self.check_selected_profile_proxy)
-        check_proxy_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 8px;")
-        btn_layout3.addWidget(check_proxy_btn)
-
-        record_actions_btn = QPushButton("🎬 Record Actions (Playwright)")
-        record_actions_btn.clicked.connect(self.record_actions_for_profile)
-        record_actions_btn.setStyleSheet("background-color: #FF5722; color: white; font-weight: bold; padding: 8px;")
-        btn_layout3.addWidget(record_actions_btn)
-
-        layout.addLayout(btn_layout3)
-
-        # Row 4: MEXC Auth button
-        btn_layout4 = QHBoxLayout()
-
-        mexc_auth_btn = QPushButton("🔐 MEXC Auth (Login)")
-        mexc_auth_btn.clicked.connect(self.mexc_auth_for_profile)
-        mexc_auth_btn.setStyleSheet("background-color: #9C27B0; color: white; font-weight: bold; padding: 8px;")
-        btn_layout4.addWidget(mexc_auth_btn)
-
-        layout.addLayout(btn_layout4)
-
-        # Profile details
-        self.profile_details = QTextEdit()
-        self.profile_details.setReadOnly(True)
-        self.profile_details.setMaximumHeight(150)
-        self.profile_details.setPlaceholderText("Select a profile to view details...")
-        layout.addWidget(QLabel("Profile Details:"))
-        layout.addWidget(self.profile_details)
-
-        # Connect selection change
-        self.profile_list.currentItemChanged.connect(self.on_profile_selected)
-
-        return widget
-
-    def create_scraper_tab(self):
-        """Create the scraper runner tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # Header
-        header = QLabel("Run Web Scraper with Profile")
-        header_font = QFont()
-        header_font.setPointSize(12)
-        header_font.setBold(True)
-        header.setFont(header_font)
-        layout.addWidget(header)
-
-        # Profile selection
-        profile_group = QGroupBox("Select Profile")
-        profile_layout = QVBoxLayout()
-
-        self.profile_combo = QComboBox()
-        self.refresh_profile_combo()
-        profile_layout.addWidget(self.profile_combo)
-
-        profile_group.setLayout(profile_layout)
-        layout.addWidget(profile_group)
-
-        # URL input
-        url_group = QGroupBox("Target URL")
-        url_layout = QVBoxLayout()
-
-        url_hint = QLabel("💡 Tip: You can enter 'example.com' or 'https://example.com'")
-        url_hint.setStyleSheet("color: #888; font-size: 10px;")
-        url_layout.addWidget(url_hint)
-
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("example.com or https://example.com")
-        self.url_input.setText("mexc.com")
-        url_layout.addWidget(self.url_input)
-
-        url_group.setLayout(url_layout)
-        layout.addWidget(url_group)
-
-        # Scraper options
-        options_group = QGroupBox("Options")
-        options_layout = QVBoxLayout()
-
-        self.headless_combo = QComboBox()
-        self.headless_combo.addItems(["Visible Browser", "Headless Mode"])
-        options_layout.addWidget(QLabel("Browser Mode:"))
-        options_layout.addWidget(self.headless_combo)
-
-        options_group.setLayout(options_layout)
-        layout.addWidget(options_group)
-
-        # Run button
-        self.run_btn = QPushButton("▶️ Run Scraper")
-        self.run_btn.setMinimumHeight(50)
-        self.run_btn.clicked.connect(self.run_scraper)
-        layout.addWidget(self.run_btn)
-
-        # Log output
-        layout.addWidget(QLabel("Log Output:"))
-        self.log_output = QTextEdit()
-        self.log_output.setReadOnly(True)
-        self.log_output.setMaximumHeight(200)
-        layout.addWidget(self.log_output)
-
+        layout.addWidget(title)
         layout.addStretch()
 
-        return widget
+        # Delete Selected button (hidden by default)
+        self.delete_selected_btn = QPushButton("🗑️ Delete Selected")
+        self.delete_selected_btn.setObjectName("deleteSelectedBtn")
+        self.delete_selected_btn.setStyleSheet("background-color: #d32f2f; padding: 8px 16px;")
+        self.delete_selected_btn.clicked.connect(self.delete_selected_profiles)
+        self.delete_selected_btn.setFixedWidth(150)
+        self.delete_selected_btn.hide()  # Hidden by default
 
-    def create_results_tab(self):
-        """Create the results viewer tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        layout.addWidget(self.delete_selected_btn)
 
-        # Header
-        header = QLabel("Scraping Results")
-        header_font = QFont()
-        header_font.setPointSize(12)
-        header_font.setBold(True)
-        header.setFont(header_font)
-        layout.addWidget(header)
+        # Settings button
+        settings_btn = QPushButton("⚙ Settings")
+        settings_btn.setObjectName("settingsBtn")
+        settings_btn.clicked.connect(self.open_settings)
+        settings_btn.setFixedWidth(120)
 
-        # Results table
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(4)
-        self.results_table.setHorizontalHeaderLabels(["URL", "Title", "Heading", "Proxy Used"])
-        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.addWidget(self.results_table)
+        layout.addWidget(settings_btn)
 
-        # Buttons
-        btn_layout = QHBoxLayout()
+        return header
 
-        clear_btn = QPushButton("🗑️ Clear Results")
-        clear_btn.clicked.connect(self.clear_results)
-        btn_layout.addWidget(clear_btn)
+    def create_profiles_section(self):
+        """Create profiles table section"""
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(15)
 
-        export_btn = QPushButton("💾 Export to JSON")
-        export_btn.clicked.connect(self.export_results)
-        btn_layout.addWidget(export_btn)
+        # Section title
+        title = QLabel("Profiles")
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #64b5f6;")
+        layout.addWidget(title)
 
-        layout.addLayout(btn_layout)
+        # Profiles table
+        self.profiles_table = QTableWidget()
+        self.profiles_table.setColumnCount(5)
+        self.profiles_table.setHorizontalHeaderLabels([
+            "", "Email", "Proxy", "2FA Code", "Status"
+        ])
 
-        return widget
+        # Set column widths
+        header = self.profiles_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Select
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Email
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Proxy
+        header.setSectionResizeMode(3, QHeaderView.Fixed)  # 2FA Code
+        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Status
 
-    def refresh_profile_list(self):
-        """Refresh the profile list widget"""
-        self.profile_list.clear()
+        self.profiles_table.setColumnWidth(0, 50)  # Select (smaller)
+        self.profiles_table.setColumnWidth(3, 150)  # 2FA Code
+        self.profiles_table.setColumnWidth(4, 100)  # Status
+
+        self.profiles_table.setMinimumHeight(250)
+        self.profiles_table.setMaximumHeight(350)
+
+        layout.addWidget(self.profiles_table)
+
+        # Buttons row
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(10)
+
+        # Import button
+        import_btn = QPushButton("📥 Import")
+        import_btn.setObjectName("importBtn")
+        import_btn.clicked.connect(self.import_profiles)
+        import_btn.setFixedWidth(150)
+        buttons_layout.addWidget(import_btn)
+
+        buttons_layout.addStretch()
+
+        # Open Selected button
+        open_selected_btn = QPushButton("Open Selected")
+        open_selected_btn.setObjectName("openSelectedBtn")
+        open_selected_btn.clicked.connect(self.open_selected_profiles)
+        open_selected_btn.setFixedWidth(150)
+        buttons_layout.addWidget(open_selected_btn)
+
+        # Close Selected button
+        close_selected_btn = QPushButton("Close Selected")
+        close_selected_btn.setObjectName("closeSelectedBtn")
+        close_selected_btn.clicked.connect(self.close_selected_profiles)
+        close_selected_btn.setFixedWidth(150)
+        buttons_layout.addWidget(close_selected_btn)
+
+        layout.addLayout(buttons_layout)
+
+        return section
+
+    def create_operation_mode_section(self):
+        """Create operation mode section with radio buttons"""
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(12)
+
+        # Section title
+        title = QLabel("Operation Mode")
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #64b5f6;")
+        layout.addWidget(title)
+
+        # Radio buttons layout
+        radio_layout = QHBoxLayout()
+        radio_layout.setSpacing(30)
+
+        # Create button group
+        self.operation_group = QButtonGroup()
+
+        # Create radio buttons
+        modes = [
+            ("Login", "login"),
+            ("Short", "short"),
+            ("Long", "long"),
+            ("Balance", "balance"),
+            ("RK", "rk")
+        ]
+
+        for i, (label, value) in enumerate(modes):
+            radio = QRadioButton(label)
+            radio.setProperty("mode", value)
+            self.operation_group.addButton(radio, i)
+            radio_layout.addWidget(radio)
+
+            # Select first option by default
+            if i == 0:
+                radio.setChecked(True)
+
+        radio_layout.addStretch()
+        layout.addLayout(radio_layout)
+
+        return section
+
+    def create_logs_section(self):
+        """Create logs section"""
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(10)
+
+        # Header with title and clear button
+        header_layout = QHBoxLayout()
+
+        title = QLabel("Logs")
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #64b5f6;")
+        header_layout.addWidget(title)
+
+        header_layout.addStretch()
+
+        clear_btn = QPushButton("Clear Log")
+        clear_btn.setObjectName("clearLogBtn")
+        clear_btn.clicked.connect(self.clear_log)
+        clear_btn.setFixedWidth(100)
+        header_layout.addWidget(clear_btn)
+
+        layout.addLayout(header_layout)
+
+        # Log text area
+        self.log_output = QTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setMinimumHeight(150)
+        self.log_output.setMaximumHeight(250)
+
+        layout.addWidget(self.log_output)
+
+        # Initial log message
+        self.log("✓ Hysk Mexc Futures ready - You can now manage profiles")
+
+        return section
+
+    def refresh_profiles_table(self):
+        """Refresh profiles table with data from profile manager"""
+        # Stop all existing TOTP timers
+        for timer in self.totp_timers.values():
+            timer.stop()
+        self.totp_timers.clear()
+
+        # Clear table
+        self.profiles_table.setRowCount(0)
+
+        # Get all profiles
         profiles = self.profile_manager.get_all_profiles()
-        self.profile_list.addItems(profiles)
 
-    def refresh_profile_combo(self):
-        """Refresh the profile combo box"""
-        self.profile_combo.clear()
-        profiles = self.profile_manager.get_all_profiles()
-        if profiles:
-            self.profile_combo.addItems(profiles)
-        else:
-            self.profile_combo.addItem("No profiles available")
+        for profile_name in profiles:
+            profile_info = self.profile_manager.get_profile_info(profile_name)
+            if not profile_info:
+                continue
 
-    def create_new_profile(self):
-        """Create a new browser profile"""
-        name, ok = QInputDialog.getText(
-            self,
-            "Create Profile",
-            "Enter profile name:"
-        )
+            row = self.profiles_table.rowCount()
+            self.profiles_table.insertRow(row)
 
-        if ok and name:
-            description, ok2 = QInputDialog.getText(
-                self,
-                "Create Profile",
-                "Enter profile description (optional):"
-            )
+            # Set row height (30% bigger than default ~30px = ~40px)
+            self.profiles_table.setRowHeight(row, 45)
 
-            success, message = self.profile_manager.create_profile(
-                name,
-                description if ok2 else ""
-            )
+            # Column 0: Select checkbox
+            checkbox = QCheckBox()
+            checkbox.setText("")
+            checkbox.setStyleSheet("""
+                QCheckBox {
+                    background: none;
+                    border: none;
+                    padding: 0px;
+                    margin: 0px;
+                    margin-left: 7px;
+                }
+                QCheckBox::indicator {
+                    width: 12px;
+                    height: 12px;
+                    border: 2px solid #1976d2;
+                    border-radius: 6px;
+                    background: none;
+                }
+                QCheckBox::indicator:unchecked {
+                    background: none;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #1976d2;
+                }
+                QCheckBox::indicator:hover {
+                    border-color: #64b5f6;
+                }
+            """)
 
-            if success:
-                QMessageBox.information(self, "Success", message)
-                self.refresh_profile_list()
-                self.refresh_profile_combo()
-                self.log(f"✅ Created profile: {name}")
+            self.profiles_table.setCellWidget(row, 0, checkbox)
+
+            # Column 1: Email
+            email = profile_info.get('email', 'N/A')
+            email_item = QTableWidgetItem(email)
+            email_item.setFlags(email_item.flags() & ~Qt.ItemIsEditable)
+            self.profiles_table.setItem(row, 1, email_item)
+
+            # Column 2: Proxy (extract IP only)
+            proxy = profile_info.get('proxy', '')
+            proxy_ip = self.extract_proxy_ip(proxy)
+            proxy_item = QTableWidgetItem(proxy_ip)
+            proxy_item.setFlags(proxy_item.flags() & ~Qt.ItemIsEditable)
+            self.profiles_table.setItem(row, 2, proxy_item)
+
+            # Column 3: 2FA Code (with countdown)
+            twofa_secret = profile_info.get('twofa_secret', '')
+            if twofa_secret:
+                # Generate initial TOTP code
+                totp_text = self.generate_totp_with_timer(twofa_secret)
+                totp_item = QTableWidgetItem(totp_text)
+                totp_item.setForeground(QColor("#64b5f6"))
+                totp_item.setFlags(totp_item.flags() & ~Qt.ItemIsEditable)
+                self.profiles_table.setItem(row, 3, totp_item)
+
+                # Start timer to update TOTP every second
+                timer = QTimer()
+                timer.timeout.connect(lambda r=row, s=twofa_secret: self.update_totp_cell(r, s))
+                timer.start(1000)  # Update every second
+                self.totp_timers[row] = timer
             else:
-                QMessageBox.warning(self, "Error", message)
+                totp_item = QTableWidgetItem("—")
+                totp_item.setFlags(totp_item.flags() & ~Qt.ItemIsEditable)
+                self.profiles_table.setItem(row, 3, totp_item)
 
-    def delete_selected_profile(self):
-        """Delete the selected profile"""
-        current_item = self.profile_list.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select a profile to delete")
+            # Column 4: Status
+            status_item = QTableWidgetItem("Closed")
+            status_item.setForeground(QColor("#ff9800"))
+            status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
+            self.profiles_table.setItem(row, 4, status_item)
+
+            # Connect checkbox to update delete button visibility
+            checkbox.stateChanged.connect(self.update_delete_button_visibility)
+
+    def extract_proxy_ip(self, proxy_string):
+        """Extract IP address from proxy string"""
+        if not proxy_string:
+            return "—"
+
+        # Format: socks5://user:pass@IP:PORT
+        # Extract just the IP part
+        try:
+            if '@' in proxy_string:
+                # Format: protocol://user:pass@IP:port
+                ip_port = proxy_string.split('@')[1]
+                ip = ip_port.split(':')[0]
+                return ip
+            else:
+                return "Invalid proxy format"
+        except:
+            return proxy_string
+
+    def generate_totp_with_timer(self, secret):
+        """Generate TOTP code with remaining time"""
+        try:
+            totp = pyotp.TOTP(secret)
+            code = totp.now()
+
+            # Calculate remaining time
+            import time
+            current_time = int(time.time())
+            time_remaining = 30 - (current_time % 30)
+
+            return f"{code} ({time_remaining}s)"
+        except:
+            return "Invalid secret"
+
+    def update_totp_cell(self, row, secret):
+        """Update TOTP code in table cell"""
+        try:
+            totp_text = self.generate_totp_with_timer(secret)
+            item = self.profiles_table.item(row, 3)
+            if item:
+                item.setText(totp_text)
+        except:
+            pass
+
+    def get_selected_profile_rows(self):
+        """Get list of selected profile rows"""
+        selected_rows = []
+        for row in range(self.profiles_table.rowCount()):
+            checkbox = self.profiles_table.cellWidget(row, 0)
+            if checkbox and isinstance(checkbox, QCheckBox) and checkbox.isChecked():
+                selected_rows.append(row)
+        return selected_rows
+
+    def update_delete_button_visibility(self):
+        """Show/hide delete button based on selection"""
+        selected_rows = self.get_selected_profile_rows()
+        if selected_rows:
+            self.delete_selected_btn.show()
+        else:
+            self.delete_selected_btn.hide()
+
+    def delete_selected_profiles(self):
+        """Delete all selected profiles"""
+        selected_rows = self.get_selected_profile_rows()
+
+        if not selected_rows:
             return
 
-        profile_name = current_item.text()
+        # Get profile names for selected rows
+        profiles_to_delete = []
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if email_item:
+                email = email_item.text()
 
+                # Find profile name by email
+                profiles = self.profile_manager.get_all_profiles()
+                for name in profiles:
+                    info = self.profile_manager.get_profile_info(name)
+                    if info and info.get('email') == email:
+                        profiles_to_delete.append((name, email))
+                        break
+
+        if not profiles_to_delete:
+            return
+
+        # Confirm deletion
+        profile_list = "\n".join([f"• {email}" for name, email in profiles_to_delete])
         reply = QMessageBox.question(
             self,
             "Confirm Delete",
-            f"Are you sure you want to delete profile '{profile_name}'?",
+            f"Delete {len(profiles_to_delete)} selected profile(s)?\n\n{profile_list}\n\nThis cannot be undone!",
             QMessageBox.Yes | QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
-            success, message = self.profile_manager.delete_profile(profile_name)
-            if success:
-                QMessageBox.information(self, "Success", message)
-                self.refresh_profile_list()
-                self.refresh_profile_combo()
-                self.profile_details.clear()
-                self.log(f"🗑️ Deleted profile: {profile_name}")
-            else:
-                QMessageBox.warning(self, "Error", message)
+            # Delete all profiles
+            deleted_count = 0
+            for profile_name, email in profiles_to_delete:
+                success, message = self.profile_manager.delete_profile(profile_name)
+                if success:
+                    self.log(f"🗑️ Deleted profile: {email}")
+                    deleted_count += 1
+                else:
+                    self.log(f"❌ Failed to delete {email}: {message}")
 
-    def show_profile_info(self):
-        """Show detailed info about selected profile"""
-        current_item = self.profile_list.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select a profile")
-            return
+            # Refresh table
+            self.refresh_profiles_table()
+            self.log(f"✅ Deleted {deleted_count} of {len(profiles_to_delete)} profile(s)")
 
-        profile_name = current_item.text()
-        info = self.profile_manager.get_profile_info(profile_name)
+            # Hide delete button
+            self.delete_selected_btn.hide()
 
-        if info:
-            info_text = f"""
-Profile Name: {info['name']}
-Description: {info.get('description', 'N/A')}
-Email: {info.get('email', 'N/A')}
-Password: {'***' if info.get('password') else 'N/A'}
-Proxy: {info.get('proxy', 'N/A')}
-2FA Secret: {'***' if info.get('twofa_secret') else 'N/A'}
-Created: {info['created_at']}
-Last Used: {info.get('last_used', 'Never')}
-Path: {info['path']}
-            """
-            QMessageBox.information(self, "Profile Info", info_text)
+    # === BUTTON HANDLERS ===
 
-    def import_profiles_from_excel(self):
-        """Import profiles from Excel file"""
-        # Open file dialog to select Excel file
+    def open_settings(self):
+        """Open settings dialog"""
+        self.log("⚙ Settings clicked (functionality to be implemented)")
+        QMessageBox.information(
+            self,
+            "Settings",
+            "Settings functionality will be implemented in future version"
+        )
+
+    def import_profiles(self):
+        """Import profiles from Excel"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Excel File",
@@ -348,9 +628,8 @@ Path: {info['path']}
         )
 
         if not file_path:
-            return  # User cancelled
+            return
 
-        # Confirm import
         reply = QMessageBox.question(
             self,
             "Confirm Import",
@@ -361,543 +640,73 @@ Path: {info['path']}
         if reply != QMessageBox.Yes:
             return
 
-        # Show progress message
-        self.statusBar().showMessage("Importing profiles from Excel...")
         self.log("📥 Starting Excel import...")
 
         try:
-            # Import profiles
             success_count, skipped_count, errors = self.profile_manager.import_from_excel(file_path)
 
-            # Refresh profile list
-            self.refresh_profile_list()
-            self.refresh_profile_combo()
+            self.refresh_profiles_table()
 
-            # Build result message
-            result_msg = f"""
-Import Complete!
-
-✅ Successfully imported: {success_count} profiles
-⚠️ Skipped: {skipped_count} profiles
-
-"""
+            result_msg = f"Import Complete!\n\n✅ Successfully imported: {success_count} profiles\n⚠️ Skipped: {skipped_count} profiles"
 
             if errors:
-                result_msg += "Errors/Warnings:\n"
-                # Show only first 10 errors
-                for error in errors[:10]:
+                result_msg += "\n\nErrors/Warnings:\n"
+                for error in errors[:5]:
                     result_msg += f"• {error}\n"
-                if len(errors) > 10:
-                    result_msg += f"\n... and {len(errors) - 10} more"
+                if len(errors) > 5:
+                    result_msg += f"\n... and {len(errors) - 5} more"
 
-            # Show result
             if success_count > 0:
                 QMessageBox.information(self, "Import Complete", result_msg)
-                self.log(f"✅ Imported {success_count} profiles successfully!")
+                self.log(f"✅ Imported {success_count} profiles successfully")
             else:
                 QMessageBox.warning(self, "Import Failed", result_msg)
                 self.log("❌ No profiles were imported")
 
-            self.statusBar().showMessage(f"Import complete: {success_count} imported, {skipped_count} skipped")
-
         except Exception as e:
-            error_msg = f"Failed to import profiles:\n{str(e)}"
-            QMessageBox.critical(self, "Import Error", error_msg)
+            QMessageBox.critical(self, "Import Error", f"Failed to import profiles:\n{str(e)}")
             self.log(f"❌ Import error: {str(e)}")
-            self.statusBar().showMessage("Import failed")
 
-    def on_profile_selected(self, current, previous):
-        """Handle profile selection change"""
-        if current:
-            profile_name = current.text()
-            info = self.profile_manager.get_profile_info(profile_name)
+    def open_selected_profiles(self):
+        """Open selected profiles"""
+        selected_rows = self.get_selected_profile_rows()
 
-            if info:
-                # Show password/2FA as masked if present
-                password_display = '***' if info.get('password') else 'N/A'
-                twofa_display = '***' if info.get('twofa_secret') else 'N/A'
-
-                details = f"""
-<b>Profile:</b> {info['name']}<br>
-<b>Description:</b> {info.get('description', 'N/A')}<br>
-<b>Email:</b> {info.get('email', 'N/A')}<br>
-<b>Password:</b> {password_display}<br>
-<b>Proxy:</b> {info.get('proxy', 'N/A')}<br>
-<b>2FA Secret:</b> {twofa_display}<br>
-<b>Created:</b> {info['created_at']}<br>
-<b>Last Used:</b> {info.get('last_used', 'Never')}<br>
-<b>Path:</b> {info['path']}
-                """
-                self.profile_details.setHtml(details)
-
-    def run_scraper(self):
-        """Run the scraper with selected profile"""
-        profile_name = self.profile_combo.currentText()
-        url = self.url_input.text().strip()
-
-        if not url:
-            QMessageBox.warning(self, "Warning", "Please enter a URL")
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select at least one profile")
             return
 
-        if profile_name == "No profiles available":
-            QMessageBox.warning(self, "Warning", "Please create a profile first")
+        self.log(f"🚀 Opening {len(selected_rows)} selected profile(s)...")
+
+        # Placeholder - functionality to be implemented
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if email_item:
+                self.log(f"  • Opening profile: {email_item.text()}")
+
+        self.log("💡 Open functionality will be implemented in next version")
+
+    def close_selected_profiles(self):
+        """Close selected profiles"""
+        selected_rows = self.get_selected_profile_rows()
+
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select at least one profile")
             return
 
-        headless = self.headless_combo.currentIndex() == 1
+        self.log(f"🛑 Closing {len(selected_rows)} selected profile(s)...")
 
-        self.log(f"🚀 Starting scraper with profile: {profile_name}")
-        self.log(f"🌐 Target URL: {url}")
-        self.log(f"👁️ Mode: {'Headless' if headless else 'Visible'}")
+        # Placeholder - functionality to be implemented
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if email_item:
+                self.log(f"  • Closing profile: {email_item.text()}")
 
-        self.run_btn.setEnabled(False)
-        self.statusBar().showMessage("Scraping in progress...")
+        self.log("💡 Close functionality will be implemented in next version")
 
-        # Run scraper in thread
-        self.scraper_thread = ScraperThread(
-            self.scraper_runner,
-            profile_name,
-            url,
-            headless
-        )
-        self.scraper_thread.finished.connect(self.on_scraper_finished)
-        self.scraper_thread.log_signal.connect(self.log)
-        self.scraper_thread.start()
-
-    def on_scraper_finished(self, success, result):
-        """Handle scraper completion"""
-        self.run_btn.setEnabled(True)
-
-        if success:
-            self.log("✅ Scraping completed successfully!")
-            self.statusBar().showMessage("Scraping completed")
-            self.add_result_to_table(result)
-            self.tabs.setCurrentIndex(2)  # Switch to results tab
-        else:
-            self.log(f"❌ Scraping failed: {result}")
-            self.statusBar().showMessage("Scraping failed")
-            QMessageBox.warning(self, "Error", f"Scraping failed: {result}")
-
-    def add_result_to_table(self, result):
-        """Add scraping result to results table"""
-        row = self.results_table.rowCount()
-        self.results_table.insertRow(row)
-
-        self.results_table.setItem(row, 0, QTableWidgetItem(result.get("url", "")))
-        self.results_table.setItem(row, 1, QTableWidgetItem(result.get("title", "")))
-        self.results_table.setItem(row, 2, QTableWidgetItem(result.get("heading", "")))
-        self.results_table.setItem(row, 3, QTableWidgetItem(result.get("proxy_used", "No proxy")))
-
-    def clear_results(self):
-        """Clear all results from table"""
-        self.results_table.setRowCount(0)
-        self.log("🗑️ Results cleared")
-
-    def export_results(self):
-        """Export results to JSON file"""
-        if self.results_table.rowCount() == 0:
-            QMessageBox.warning(self, "Warning", "No results to export")
-            return
-
-        results = []
-        for row in range(self.results_table.rowCount()):
-            results.append({
-                "url": self.results_table.item(row, 0).text(),
-                "title": self.results_table.item(row, 1).text(),
-                "heading": self.results_table.item(row, 2).text(),
-                "proxy_used": self.results_table.item(row, 3).text() if self.results_table.item(row, 3) else "No proxy"
-            })
-
-        import datetime
-        filename = f"results_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        filepath = Path.home() / "Desktop" / filename
-
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-
-        QMessageBox.information(self, "Success", f"Results exported to:\n{filepath}")
-        self.log(f"💾 Exported results to: {filepath}")
-
-    def check_selected_profile_proxy(self):
-        """Check proxy IP for selected profile"""
-        current_item = self.profile_list.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select a profile to check")
-            return
-
-        profile_name = current_item.text()
-
-        # Check if profile has proxy
-        profile_info = self.profile_manager.get_profile_info(profile_name)
-        if not profile_info or not profile_info.get('proxy'):
-            QMessageBox.warning(
-                self,
-                "No Proxy",
-                f"Profile '{profile_name}' does not have a proxy configured.\n\nAdd a proxy to the profile first."
-            )
-            return
-
-        # Show confirmation
-        reply = QMessageBox.question(
-            self,
-            "Check Proxy",
-            f"Check proxy for profile: {profile_name}\n\nThis will:\n1. Open browser with proxy\n2. Navigate to whatismyip.com\n3. Wait 4 seconds\n4. Compare proxy IP with detected IP\n\nContinue?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
-            return
-
-        # Clear log
+    def clear_log(self):
+        """Clear log output"""
         self.log_output.clear()
-        self.log(f"🔍 Checking proxy for profile: {profile_name}")
-
-        # Start proxy check in thread
-        self.check_thread = CheckProxyThread(
-            self.scraper_runner,
-            profile_name,
-            headless=False  # Always visible for manual verification
-        )
-        self.check_thread.finished.connect(self.on_proxy_check_finished)
-        self.check_thread.log_signal.connect(self.log)
-        self.check_thread.start()
-
-        self.statusBar().showMessage("Checking proxy...")
-
-    def on_proxy_check_finished(self, success, result):
-        """Handle proxy check completion"""
-        if success:
-            # Show result popup
-            if result['is_match']:
-                message = f"✅ Proxy is similar!\n\n"
-                message += f"Proxy IP: {result['proxy_ip']}\n"
-                message += f"Detected IP: {result['detected_ip']}\n\n"
-                message += f"The proxy is working correctly!"
-                title = "✅ Proxy Verified"
-                icon = QMessageBox.Information
-            else:
-                message = f"⚠️ Proxy IP mismatch!\n\n"
-                message += f"Expected IP (from proxy): {result['proxy_ip']}\n"
-                message += f"Detected IP (from site): {result['detected_ip']}\n\n"
-                message += f"The proxy might not be working correctly."
-                title = "⚠️ Proxy Mismatch"
-                icon = QMessageBox.Warning
-
-            # Create message box
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(icon)
-            msg_box.setWindowTitle(title)
-            msg_box.setText(message)
-            msg_box.setStandardButtons(QMessageBox.Ok)
-
-            # Show the dialog and wait for OK
-            msg_box.exec()
-
-            # After user clicks OK, wait 5 seconds then log
-            self.log("💡 User clicked OK")
-            self.log("⏳ Waiting 5 seconds before finishing...")
-
-            # Use QTimer to wait 5 seconds
-            QTimer.singleShot(5000, lambda: self.after_proxy_check_delay())
-
-            self.statusBar().showMessage("Proxy check completed")
-        else:
-            QMessageBox.critical(
-                self,
-                "Proxy Check Error",
-                f"Failed to check proxy:\n\n{result}"
-            )
-            self.statusBar().showMessage("Proxy check failed")
-
-    def after_proxy_check_delay(self):
-        """Called after 5 second delay following proxy check"""
-        self.log("✅ Proxy check complete!")
-        self.log("💡 Browser window left open - close manually when done")
-
-    def record_actions_for_profile(self):
-        """Launch YOUR real Chrome browser with YOUR Chrome profile for element inspection"""
-        current_item = self.profile_list.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select a profile to inspect elements")
-            return
-
-        profile_name = current_item.text()
-
-        # Ask for URL to navigate to
-        url, ok = QInputDialog.getText(
-            self,
-            "Inspect Elements",
-            f"Enter URL to navigate and inspect elements:\n(Botasaurus Profile: {profile_name})",
-            text="https://www.whatismyip.com/"
-        )
-
-        if not ok or not url.strip():
-            return
-
-        # Ask for Chrome profile name (optional)
-        chrome_profile, ok = QInputDialog.getText(
-            self,
-            "Chrome Profile",
-            "Enter Chrome profile directory name:\n\n"
-            "Common profiles:\n"
-            "• 'Default' - first/main profile\n"
-            "• 'Profile 1' - second profile\n"
-            "• 'Profile 2' - third profile\n\n"
-            "To find your profile: open Chrome → chrome://version/\n"
-            "Look at 'Profile Path' line",
-            text="Profile 1"
-        )
-
-        if not ok:
-            return
-
-        # Show confirmation
-        message = f"Launch YOUR real Chrome browser\n\n"
-        message += f"URL: {url}\n"
-        if chrome_profile.strip():
-            message += f"Chrome Profile: {chrome_profile}\n"
-        else:
-            message += f"Chrome Profile: Default\n"
-        message += "\n"
-        message += "This will:\n"
-        message += "1. Open YOUR real Chrome browser\n"
-        message += "2. Load YOUR Chrome profile (cookies, logins, history)\n"
-        message += "3. Navigate to the URL\n"
-        message += "4. Enable Remote Debugging\n"
-        message += "5. You use F12 DevTools to inspect elements\n\n"
-        message += "✅ Real Chrome + Your profile = NO DETECTION!\n"
-        message += "✅ Captchas WILL work!\n"
-        message += "✅ Your cookies already loaded!\n\n"
-        message += "Continue?"
-
-        reply = QMessageBox.question(
-            self,
-            "Launch Chrome",
-            message,
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
-            return
-
-        # Clear log
-        self.log_output.clear()
-        self.log(f"🎬 Launching YOUR real Chrome browser")
-        self.log(f"🌐 URL: {url}")
-        if chrome_profile.strip():
-            self.log(f"👤 Chrome Profile: {chrome_profile}")
-        else:
-            self.log(f"👤 Chrome Profile: Default")
-
-        # Launch real Chrome browser with user's profile
-        try:
-            import subprocess
-            import sys
-            import os
-
-            # Find Chrome executable
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-            ]
-
-            chrome_exe = None
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    chrome_exe = path
-                    break
-
-            if not chrome_exe:
-                raise FileNotFoundError("Chrome browser not found! Please install Google Chrome.")
-
-            self.log(f"✅ Found Chrome: {chrome_exe}")
-
-            # Build Chrome command
-            cmd_parts = [chrome_exe]
-
-            # Add profile directory
-            if chrome_profile.strip():
-                cmd_parts.append(f'--profile-directory={chrome_profile.strip()}')
-                self.log(f"✅ Using profile: {chrome_profile.strip()}")
-            else:
-                self.log(f"✅ Using Default profile")
-
-            # Add remote debugging for DevTools access
-            cmd_parts.append("--remote-debugging-port=9222")
-
-            # Add new window flag
-            cmd_parts.append("--new-window")
-
-            # Add URL
-            cmd_parts.append(url)
-
-            self.log("🚀 Launching YOUR real Chrome browser...")
-            self.log(f"📝 Command: {' '.join(cmd_parts)}")
-
-            # Launch Chrome directly
-            subprocess.Popen(cmd_parts)
-
-            self.log("✅ Chrome browser launched successfully!")
-            self.log("")
-            self.log("💡 How to inspect elements:")
-            self.log("   1. Chrome opened with YOUR profile (cookies loaded!)")
-            self.log("   2. Press F12 to open Chrome DevTools")
-            self.log("   3. Click 'Elements' tab")
-            self.log("   4. Click the 'Select element' icon (Ctrl+Shift+C)")
-            self.log("   5. Click on any element on the page")
-            self.log("   6. Right-click in HTML → Copy → Copy selector")
-            self.log("")
-            self.log("🎯 Alternative methods to get selectors:")
-            self.log("   • Copy CSS selector")
-            self.log("   • Copy XPath")
-            self.log("   • Copy JS path")
-            self.log("")
-            self.log("🛡️ Using YOUR real Chrome profile:")
-            self.log("   ✅ Your cookies are loaded")
-            self.log("   ✅ Your logins are available")
-            self.log("   ✅ Captchas WILL work!")
-            self.log("   ✅ No automation detection!")
-            self.log("")
-            self.log("💡 Remote debugging enabled on port 9222")
-            self.log("💡 Close the browser window when done")
-
-            self.statusBar().showMessage("Chrome browser launched with your profile")
-
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-
-            QMessageBox.critical(
-                self,
-                "Launch Error",
-                f"Failed to launch Chrome browser:\n\n{str(e)}\n\n"
-                f"Make sure:\n"
-                f"1. Google Chrome is installed\n"
-                f"2. Chrome profile name is correct\n"
-                f"   (Check chrome://version/ in Chrome to see profile path)"
-            )
-            self.log(f"❌ Error: {str(e)}")
-            self.log(f"📋 Details: {error_details}")
-            self.statusBar().showMessage("Failed to launch Chrome")
-
-    def mexc_auth_for_profile(self):
-        """Perform MEXC login automation with Botasaurus"""
-        current_item = self.profile_list.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, "Warning", "Please select a profile for MEXC login")
-            return
-
-        profile_name = current_item.text()
-
-        # Get profile info to get credentials from Excel
-        profile_info = self.profile_manager.get_profile_info(profile_name)
-
-        if not profile_info:
-            QMessageBox.warning(self, "Warning", f"Profile {profile_name} not found!")
-            return
-
-        # Get credentials from profile
-        email = profile_info.get('email', '').strip()
-        password = profile_info.get('password', '').strip()
-        secret = profile_info.get('twofa_secret', '').strip()  # Saved as 'twofa_secret' in profile dict
-
-        # Check if all required fields are present
-        if not email:
-            QMessageBox.warning(
-                self,
-                "Missing Email",
-                f"Profile {profile_name} doesn't have Email configured!\n\n"
-                "Please add Email in Excel file."
-            )
-            return
-
-        if not password:
-            QMessageBox.warning(
-                self,
-                "Missing Password",
-                f"Profile {profile_name} doesn't have Password configured!\n\n"
-                "Please add Password in Excel file."
-            )
-            return
-
-        if not secret:
-            QMessageBox.warning(
-                self,
-                "Missing 2FA Secret",
-                f"Profile {profile_name} doesn't have 2FA Secret configured!\n\n"
-                "Please add 2FA Secret in Excel file (column: 2fa_secret)."
-            )
-            return
-
-        # Show confirmation
-        message = f"Start MEXC login for profile: {profile_name}\n\n"
-        message += f"📧 Email: {email}\n"
-        message += f"🔑 Password: {'*' * len(password)}\n"
-        message += f"🔐 2FA Secret: {'*' * len(secret)}\n"
-        message += f"(Loaded from Excel)\n\n"
-        message += "This will:\n"
-        message += "1. Navigate to MEXC login page\n"
-        message += "2. Enter email and password\n"
-        message += "3. Handle captcha (you will be prompted)\n"
-        message += "4. Generate and enter 2FA code automatically\n"
-        message += "5. Complete login\n\n"
-        message += "✅ Using Botasaurus anti-detection browser\n"
-        message += "✅ Using profile's proxy (if configured)\n\n"
-        message += "Continue?"
-
-        reply = QMessageBox.question(
-            self,
-            "MEXC Login",
-            message,
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
-            return
-
-        # Clear log
-        self.log_output.clear()
-        self.log(f"🔐 Starting MEXC login for profile: {profile_name}")
-        self.log(f"📧 Email: {email}")
-        self.log(f"🔑 Password: {'*' * len(password)}")
-        self.log(f"🔐 2FA Secret: {'*' * len(secret)}")
-        self.log(f"✅ Credentials loaded from Excel profile")
-
-        # Launch MEXC auth in thread
-        self.mexc_thread = MexcAuthThread(
-            self.scraper_runner,
-            profile_name,
-            email,
-            password,
-            secret,
-            headless=False
-        )
-
-        self.mexc_thread.log_signal.connect(self.log)
-        self.mexc_thread.captcha_signal.connect(self.on_mexc_captcha)
-        self.mexc_thread.finished.connect(self.on_mexc_finished)
-        self.mexc_thread.start()
-
-        self.statusBar().showMessage(f"MEXC login started for {profile_name}...")
-
-    def on_mexc_captcha(self):
-        """Handle captcha detection - pause and wait for user"""
-        QMessageBox.warning(
-            self,
-            "Captcha Detected",
-            "⚠️ Пройдите капчу в браузере!\n\n"
-            "Нажмите OK после того как пройдете капчу.\n"
-            "Скрипт подождет 10 секунд и продолжит работу."
-        )
-
-    def on_mexc_finished(self, success, result):
-        """Handle MEXC auth completion"""
-        if success:
-            self.statusBar().showMessage("MEXC login completed successfully")
-            self.log("✅ MEXC login completed!")
-        else:
-            self.statusBar().showMessage("MEXC login failed")
-            self.log(f"❌ Error: {result}")
+        self.log("✓ Log cleared")
 
     def log(self, message):
         """Add message to log output"""
