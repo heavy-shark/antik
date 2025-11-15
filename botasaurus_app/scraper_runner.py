@@ -672,3 +672,8 @@ class MexcAuthThread(QThread):
             error_msg = f"MEXC Auth error: {str(e)}\n{traceback.format_exc()}"
             self.log_signal.emit(f"❌ Error: {str(e)}")
             self.finished.emit(False, error_msg)
+        finally:
+            # Ensure thread completes cleanly
+            # Sleep briefly to allow signals to be processed
+            import time
+            time.sleep(0.1)

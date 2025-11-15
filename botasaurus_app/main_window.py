@@ -815,6 +815,9 @@ class MainWindow(QMainWindow):
         thread.captcha_signal.connect(lambda pn=profile_name: self.on_captcha_detected(pn))
         thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_login_finished(success, result, pn))
 
+        # Also connect to thread finished signal for cleanup
+        thread.finished.connect(lambda: thread.deleteLater())
+
         # Start thread
         thread.start()
 
@@ -844,6 +847,7 @@ class MainWindow(QMainWindow):
 
         row = thread_info['row']
         email = thread_info['email']
+        thread = thread_info['thread']
 
         if success:
             self.log(f"✅ Login successful for: {email}")
@@ -853,8 +857,13 @@ class MainWindow(QMainWindow):
             self.log(f"   Error: {result}")
             self.update_profile_status(row, "Login failed", "#f44336")
 
+        # Wait for thread to fully finish before removing
+        if thread.isRunning():
+            thread.wait(1000)  # Wait max 1 second
+
         # Remove thread from active threads
-        del self.active_threads[profile_name]
+        if profile_name in self.active_threads:
+            del self.active_threads[profile_name]
 
         # Process next profile in queue
         self.process_next_login()
@@ -896,3 +905,31 @@ class MainWindow(QMainWindow):
         self.log_output.verticalScrollBar().setValue(
             self.log_output.verticalScrollBar().maximum()
         )
+
+    def closeEvent(self, event):
+        """Handle application close event - clean up threads"""
+        # Check if there are active threads
+        if self.active_threads:
+            self.log("⚠️ Waiting for active login threads to finish...")
+
+            # Wait for all active threads to finish (max 5 seconds each)
+            for profile_name, thread_info in list(self.active_threads.items()):
+                thread = thread_info['thread']
+                if thread.isRunning():
+                    self.log(f"⏳ Waiting for thread: {thread_info['email']}")
+                    thread.wait(5000)  # Wait max 5 seconds
+
+                    # If still running after timeout, terminate
+                    if thread.isRunning():
+                        self.log(f"⚠️ Force terminating thread: {thread_info['email']}")
+                        thread.terminate()
+                        thread.wait(1000)
+
+        # Stop all TOTP timers
+        for timer in self.totp_timers.values():
+            timer.stop()
+
+        self.log("👋 Application closing...")
+
+        # Accept the close event
+        event.accept()
