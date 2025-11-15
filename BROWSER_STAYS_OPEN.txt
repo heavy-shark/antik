@@ -1,0 +1,193 @@
+═══════════════════════════════════════════════════════════════
+   ✅ BROWSER BEHAVIOR - UPDATED!
+═══════════════════════════════════════════════════════════════
+
+🔧 CHANGE MADE:
+
+  ✅ Browser NO LONGER auto-closes after scraping
+  ✅ Browser window STAYS OPEN for manual interaction
+  ✅ You can close it manually when done
+
+═══════════════════════════════════════════════════════════════
+   🎯 WHY THIS IS USEFUL
+═══════════════════════════════════════════════════════════════
+
+  ✅ Verify proxy is working (check IP)
+  ✅ Complete manual login with 2FA
+  ✅ Interact with the page manually
+  ✅ Take screenshots
+  ✅ Fill forms manually
+  ✅ Debug scraping issues
+  ✅ See exactly what the browser sees
+
+═══════════════════════════════════════════════════════════════
+   📊 WHAT YOU'LL SEE NOW
+═══════════════════════════════════════════════════════════════
+
+After running scraper:
+
+  🚀 Starting scraper with profile: nesterov_88blp_at_rambler_ru
+  🌐 Target URL: mexc.com
+  👁️ Mode: Visible
+  🔧 Auto-fixed URL: mexc.com → https://mexc.com
+  🌐 Using proxy: socks5://***@5.22.204.238:50101
+  🔧 Initializing browser...
+  ✅ Title: MEXC - Bitcoin Exchange
+  ✅ Heading: Trade Crypto
+  ✅ Proxy used: socks5://***@5.22.204.238:50101
+  💡 Browser window left open - close manually when done  ← NEW!
+  ✅ Scraping completed successfully!
+
+═══════════════════════════════════════════════════════════════
+   🖥️ BROWSER WINDOW
+═══════════════════════════════════════════════════════════════
+
+  After scraping completes:
+    ✅ Browser window STAYS OPEN
+    ✅ Page is fully loaded
+    ✅ You can interact with it
+    ✅ Proxy connection is active
+    ✅ Session/cookies are preserved
+
+  To close:
+    ❌ Click the X button on browser window
+    ❌ Or close from taskbar
+
+═══════════════════════════════════════════════════════════════
+   💡 USE CASES
+═══════════════════════════════════════════════════════════════
+
+Use Case 1: Manual Login
+  1. Run scraper to load page
+  2. Browser opens and stays open
+  3. Manually enter 2FA code
+  4. Complete login
+  5. Session saved to profile!
+
+Use Case 2: Verify Proxy
+  1. Run scraper to page like: https://api.ipify.org
+  2. Browser shows your proxy IP
+  3. Confirm proxy is working
+  4. Close browser when verified
+
+Use Case 3: Debug Scraping
+  1. Run scraper
+  2. Browser stays open on final page
+  3. Inspect page manually
+  4. Check what data is available
+  5. Update scraper code accordingly
+
+Use Case 4: Fill Forms
+  1. Run scraper to navigate to form
+  2. Fill form manually in browser
+  3. Submit form
+  4. Close browser when done
+
+═══════════════════════════════════════════════════════════════
+   🧪 TEST IT NOW
+═══════════════════════════════════════════════════════════════
+
+1. Launch app:
+   START_APP.bat
+
+2. Run scraper:
+   - Select profile with proxy
+   - Enter URL: mexc.com
+   - Click Run
+
+3. Observe:
+   - Browser opens
+   - Navigates through proxy
+   - Page loads
+   - Log shows: "Browser window left open"
+   - Browser STAYS OPEN ✅
+
+4. Interact:
+   - Click around the page
+   - Check console (F12)
+   - Verify proxy IP
+   - Do whatever you need
+
+5. Close:
+   - Click X on browser when done
+   - Or close from taskbar
+
+═══════════════════════════════════════════════════════════════
+   🔧 TECHNICAL DETAILS
+═══════════════════════════════════════════════════════════════
+
+What changed:
+  File: botasaurus_app/scraper_runner.py
+
+  Before:
+    driver.quit()  ← Auto-closed browser
+
+  After:
+    # driver.quit() - removed to keep browser open
+    ← Browser stays open!
+
+  Also added:
+    Log message: "Browser window left open - close manually when done"
+
+═══════════════════════════════════════════════════════════════
+   ⚠️ IMPORTANT NOTES
+═══════════════════════════════════════════════════════════════
+
+  1. Multiple Browsers:
+     - Each scraper run opens a new browser
+     - Previous browsers stay open
+     - Close old browsers manually to free memory
+
+  2. Memory Usage:
+     - Open browsers use RAM
+     - Close when not needed
+     - Or restart app to close all
+
+  3. Profile Sessions:
+     - If you log in while browser is open
+     - Close browser properly (click X)
+     - Session will be saved to profile
+     - Next run = still logged in!
+
+  4. Headless Mode:
+     - Even in headless mode, browser stays running
+     - Use task manager to close if needed
+
+═══════════════════════════════════════════════════════════════
+   💡 PRO TIPS
+═══════════════════════════════════════════════════════════════
+
+Tip 1: Keep Browser for Manual Tasks
+  Run scraper → Browser opens → Do manual work → Close
+
+Tip 2: Verify Proxy Works
+  Navigate to: https://api.ipify.org
+  See your proxy IP displayed
+  Confirms proxy connection
+
+Tip 3: Complete 2FA Login
+  Run scraper → Page loads → Enter 2FA manually → Login saved!
+
+Tip 4: Debug Page Issues
+  If scraping fails → Browser stays open → Inspect page → Fix code
+
+Tip 5: Close Old Browsers
+  Windows: Alt+Tab to see all browsers → Close unused ones
+  Or: Check taskbar for multiple Chrome icons
+
+═══════════════════════════════════════════════════════════════
+   🎉 READY!
+═══════════════════════════════════════════════════════════════
+
+  Browser now STAYS OPEN after scraping!
+
+  Perfect for:
+    ✅ Manual interaction
+    ✅ 2FA login
+    ✅ Debugging
+    ✅ Form filling
+    ✅ Verification
+
+  Just close the browser window when you're done! 🚀
+
+═══════════════════════════════════════════════════════════════

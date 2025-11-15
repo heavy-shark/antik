@@ -1,0 +1,147 @@
+═══════════════════════════════════════════════════════════════
+   🤖 BOTASAURUS DESKTOP APP - QUICK START GUIDE 🤖
+═══════════════════════════════════════════════════════════════
+
+📍 LOCATION: C:\Users\daniel\Desktop\hysk.pro\antik\
+
+═══════════════════════════════════════════════════════════════
+   ⚡ HOW TO START THE APP
+═══════════════════════════════════════════════════════════════
+
+   >>> EASIEST WAY <<<
+
+   Double-click this file:
+   📁 START_APP.bat
+
+   That's it! The app will open!
+
+═══════════════════════════════════════════════════════════════
+   📋 WHAT YOU'LL SEE
+═══════════════════════════════════════════════════════════════
+
+   The app has 3 tabs:
+
+   1. 📁 PROFILES
+      - Create new browser profiles
+      - Delete old profiles
+      - View profile info
+
+   2. 🚀 RUN SCRAPER
+      - Select a profile
+      - Enter URL to scrape
+      - Choose visible/headless mode
+      - Click "Run Scraper"
+
+   3. 📊 RESULTS
+      - View scraped data
+      - Export to JSON
+      - Clear results
+
+═══════════════════════════════════════════════════════════════
+   🎯 FIRST TIME USING?
+═══════════════════════════════════════════════════════════════
+
+   Step 1: Create a Profile
+   ────────────────────────
+   - Go to "Profiles" tab
+   - Click "Create New Profile"
+   - Name it: "test-profile"
+   - Click OK
+
+   Step 2: Run a Test Scrape
+   ──────────────────────────
+   - Go to "Run Scraper" tab
+   - Select "test-profile"
+   - URL is already filled (omkar.cloud)
+   - Click "Run Scraper"
+
+   Step 3: View Results
+   ────────────────────
+   - Results tab will open automatically
+   - You'll see: URL, Title, Heading
+   - Click "Export to JSON" to save
+
+═══════════════════════════════════════════════════════════════
+   💡 PROFILE TIPS
+═══════════════════════════════════════════════════════════════
+
+   ✅ Profiles save everything:
+      - Cookies
+      - Sessions
+      - Login states
+      - Browser fingerprint
+
+   ✅ Stay logged in:
+      - Run in "Visible Browser" mode
+      - Log into website manually
+      - Profile remembers your login!
+
+   ✅ Multiple accounts:
+      - Create profile for each account
+      - Switch between them easily
+
+═══════════════════════════════════════════════════════════════
+   ⚙️ BROWSER MODES
+═══════════════════════════════════════════════════════════════
+
+   🖥️ Visible Browser:
+      - You see the browser window
+      - Good for debugging
+      - Can interact manually
+      - Useful for logging in
+
+   👻 Headless Mode:
+      - Browser runs in background
+      - Faster
+      - No window shown
+      - Good for production
+
+═══════════════════════════════════════════════════════════════
+   ❌ NO LOCALHOST REQUIRED!
+═══════════════════════════════════════════════════════════════
+
+   This is a REAL desktop application!
+
+   ✅ No web browsers needed
+   ✅ No localhost:3000
+   ✅ No web servers
+   ✅ Just double-click and go!
+
+═══════════════════════════════════════════════════════════════
+   📂 WHERE ARE PROFILES STORED?
+═══════════════════════════════════════════════════════════════
+
+   C:\Users\daniel\.botasaurus\profiles\
+
+   Each profile gets its own folder with:
+   - Chrome user data
+   - Cookies
+   - Cache
+   - Extensions (if you add any)
+
+═══════════════════════════════════════════════════════════════
+   🔧 TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════
+
+   App won't start?
+   ────────────────
+   Try running from command line:
+
+   cd C:\Users\daniel\Desktop\hysk.pro\antik
+   python LAUNCHER.py
+
+   Browser closes immediately?
+   ───────────────────────────
+   - Normal! Scraper runs and closes
+   - Check results in Results tab
+   - Use Visible mode to watch it work
+
+═══════════════════════════════════════════════════════════════
+   🎉 READY TO START!
+═══════════════════════════════════════════════════════════════
+
+   >>> Double-click START_APP.bat <<<
+
+   Enjoy your standalone desktop scraper!
+
+═══════════════════════════════════════════════════════════════

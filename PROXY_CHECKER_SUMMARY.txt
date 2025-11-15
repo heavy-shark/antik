@@ -1,0 +1,158 @@
+═══════════════════════════════════════════════════════════════
+   🔍 PROXY CHECKER - NEW FEATURE!
+═══════════════════════════════════════════════════════════════
+
+✅ Verify proxy IP with whatismyip.com in one click!
+
+═══════════════════════════════════════════════════════════════
+   🚀 HOW TO USE
+═══════════════════════════════════════════════════════════════
+
+1. Launch app: START_APP.bat
+
+2. Go to Profiles tab
+
+3. Select a profile (with proxy)
+
+4. Click: 🔍 Check Proxy (whatismyip.com)
+
+5. Click "Yes" to confirm
+
+6. Browser opens → whatismyip.com loads
+
+7. Popup shows result:
+   ✅ "Proxy is similar!" (IPs match)
+   OR
+   ⚠️ "Proxy mismatch!" (IPs don't match)
+
+8. Click OK
+
+9. Browser stays open for manual check
+
+10. Close browser when done
+
+═══════════════════════════════════════════════════════════════
+   📊 WHAT IT DOES
+═══════════════════════════════════════════════════════════════
+
+✅ Opens browser with proxy
+✅ Navigates to whatismyip.com
+✅ Waits 4 seconds for page load
+✅ Extracts IP from page
+✅ Compares with proxy IP
+✅ Shows popup with result
+✅ Waits 5 seconds after OK
+✅ Keeps browser open
+
+═══════════════════════════════════════════════════════════════
+   📝 EXAMPLE
+═══════════════════════════════════════════════════════════════
+
+Profile: nesterov_88blp_at_rambler_ru
+Proxy: socks5://***@5.22.204.238:50101
+
+Check Result:
+  Proxy IP: 5.22.204.238
+  Detected IP: 5.22.204.238
+  Status: ✅ Match! Proxy working!
+
+═══════════════════════════════════════════════════════════════
+   💡 WHEN TO USE
+═══════════════════════════════════════════════════════════════
+
+✅ Testing new proxy
+✅ Verifying proxy works
+✅ Debugging connection issues
+✅ Checking geo-location
+✅ Quality assurance
+
+═══════════════════════════════════════════════════════════════
+   🎯 BUTTON LOCATION
+═══════════════════════════════════════════════════════════════
+
+Tab: Profiles
+Button: 🔍 Check Proxy (whatismyip.com)
+Color: Blue
+Row: 3 (below Import button)
+
+═══════════════════════════════════════════════════════════════
+   ⚙️ TECHNICAL
+═══════════════════════════════════════════════════════════════
+
+Timing:
+  - 4 seconds: Page load wait
+  - 5 seconds: After OK clicked
+  - Browser: Stays open
+
+Browser Mode:
+  - Always visible (not headless)
+  - Can see whatismyip.com page
+  - Manual verification possible
+
+IP Extraction:
+  - Method 1: CSS selector (#ipv4 > a)
+  - Method 2: Link selector (a[href^='/ip/'])
+  - Method 3: Regex pattern (\d{1,3}\.){3}\d{1,3}
+
+Comparison:
+  - Exact string match
+  - 5.22.204.238 == 5.22.204.238 → ✅
+  - 5.22.204.238 != 1.2.3.4 → ⚠️
+
+═══════════════════════════════════════════════════════════════
+   📂 FILES MODIFIED
+═══════════════════════════════════════════════════════════════
+
+✅ scraper_runner.py
+   - extract_ip_from_proxy()
+   - check_proxy_ip()
+   - CheckProxyThread class
+
+✅ main_window.py
+   - Check Proxy button
+   - check_selected_profile_proxy()
+   - on_proxy_check_finished()
+
+New Docs:
+✅ PROXY_CHECKER_GUIDE.md
+✅ PROXY_CHECKER_SUMMARY.txt
+
+═══════════════════════════════════════════════════════════════
+   🧪 QUICK TEST
+═══════════════════════════════════════════════════════════════
+
+1. START_APP.bat
+
+2. Profiles tab
+
+3. Select: nesterov_88blp_at_rambler_ru
+
+4. Click: 🔍 Check Proxy
+
+5. Yes → Browser opens → whatismyip.com
+
+6. Popup: ✅ Proxy is similar!
+
+7. OK → Wait 5 sec → Browser stays open
+
+8. Manually verify IP on page
+
+9. Close browser
+
+═══════════════════════════════════════════════════════════════
+   ✅ COMPLETE!
+═══════════════════════════════════════════════════════════════
+
+Feature is ready to use!
+
+Your exact workflow implemented:
+  ✅ Open profile
+  ✅ Site loads fully (4 sec wait)
+  ✅ Check IP similarity
+  ✅ Popup "Proxy is similar" with OK
+  ✅ After OK, wait 5 seconds
+  ✅ Browser stays open
+
+Perfect for verifying proxies work correctly! 🚀
+
+═════════════════════════════════════════════════════════════
