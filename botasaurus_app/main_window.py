@@ -339,6 +339,7 @@ class MainWindow(QMainWindow):
 
         # Create radio buttons
         modes = [
+            ("Manual", "manual"),
             ("Login", "login"),
             ("Short", "short"),
             ("Long", "long"),
@@ -696,7 +697,9 @@ class MainWindow(QMainWindow):
         self.log(f"📊 Selected {len(selected_rows)} profile(s)")
 
         # Handle different operation modes
-        if operation_mode == "login":
+        if operation_mode == "manual":
+            self.run_manual_browser_for_selected(selected_rows)
+        elif operation_mode == "login":
             self.run_mexc_login_for_selected(selected_rows)
         elif operation_mode in ["short", "long", "balance", "rk"]:
             self.log(f"⚠️ Mode '{operation_mode.upper()}' not implemented yet")
@@ -707,6 +710,80 @@ class MainWindow(QMainWindow):
             )
         else:
             self.log(f"❌ Unknown mode: {operation_mode}")
+
+    def run_manual_browser_for_selected(self, selected_rows):
+        """Open browser manually for selected profiles"""
+        self.log("🖱️ Opening browser(s) in Manual mode...")
+
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if not email_item:
+                continue
+
+            email = email_item.text()
+
+            # Find profile by email
+            profile_name = None
+            profiles = self.profile_manager.get_all_profiles()
+            for name in profiles:
+                info = self.profile_manager.get_profile_info(name)
+                if info and info.get('email') == email:
+                    profile_name = name
+                    break
+
+            if not profile_name:
+                self.log(f"❌ Profile not found for email: {email}")
+                continue
+
+            # Get profile info
+            profile_info = self.profile_manager.get_profile_info(profile_name)
+            if not profile_info:
+                self.log(f"❌ Failed to get profile info for: {email}")
+                continue
+
+            # Update status to "Opening..."
+            self.update_profile_status(row, "Opening...", "#2196f3")
+            self.log(f"▶️ Opening browser for: {email}")
+
+            try:
+                # Get proxy info
+                proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(profile_name)
+                if proxy:
+                    self.log(f"🌐 Using proxy: {proxy_display}")
+
+                # Update last used timestamp
+                self.profile_manager.update_last_used(profile_name)
+
+                # Create driver configuration
+                from botasaurus_driver import Driver
+                driver_config = {
+                    'profile': profile_name,
+                    'headless': False
+                }
+
+                # Add proxy if configured
+                if proxy:
+                    driver_config['proxy'] = proxy
+
+                # Create driver with profile and proxy
+                self.log(f"🔧 Initializing browser for {email}...")
+                driver = Driver(**driver_config)
+
+                # Navigate to MEXC homepage (or blank page)
+                driver.get("https://www.mexc.com/")
+
+                self.log(f"✅ Browser opened for: {email}")
+                self.log(f"💡 Browser window left open - use it manually!")
+                self.update_profile_status(row, "Open (Manual)", "#4caf50")
+
+                # Don't quit driver - keep browser open
+                # driver.quit() - NOT called
+
+            except Exception as e:
+                self.log(f"❌ Failed to open browser for {email}: {str(e)}")
+                self.update_profile_status(row, "Failed to open", "#f44336")
+
+        self.log("✅ All selected browsers opened")
 
     def run_mexc_login_for_selected(self, selected_rows):
         """Run MEXC login automation for selected profiles"""
