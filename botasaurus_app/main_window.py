@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.profile_manager = ProfileManager()
         self.scraper_runner = ScraperRunner(self.profile_manager)
-        self.version = "v0.01"
+        self.version = "v0.2"
         self.totp_timers = {}  # Store TOTP update timers for each row
         self.active_threads = {}  # Store active MexcAuthThread instances by profile name
         self.login_queue = []  # Queue for sequential login processing
