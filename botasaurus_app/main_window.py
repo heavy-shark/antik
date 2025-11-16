@@ -201,6 +201,11 @@ class MainWindow(QMainWindow):
         operation_section = self.create_operation_mode_section()
         content_layout.addWidget(operation_section)
 
+        # === SHORT/LONG SETTINGS SECTION ===
+        self.short_long_section = self.create_short_long_settings_section()
+        content_layout.addWidget(self.short_long_section)
+        self.short_long_section.hide()  # Hidden by default
+
         # === LOGS SECTION ===
         logs_section = self.create_logs_section()
         content_layout.addWidget(logs_section)
@@ -365,7 +370,276 @@ class MainWindow(QMainWindow):
         radio_layout.addStretch()
         layout.addLayout(radio_layout)
 
+        # Connect signal to update Short/Long settings visibility
+        self.operation_group.buttonClicked.connect(self.on_operation_mode_changed)
+
         return section
+
+    def create_short_long_settings_section(self):
+        """Create Short/Long mode settings section"""
+        from PySide6.QtWidgets import QLineEdit, QComboBox, QRadioButton
+
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 15, 10, 15)
+
+        # Section title
+        title = QLabel("Trading Settings")
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #64b5f6;")
+        layout.addWidget(title)
+
+        # === TOKEN LINK ===
+        token_layout = QHBoxLayout()
+        token_label = QLabel("Token Link:")
+        token_label.setFixedWidth(120)
+        token_label.setStyleSheet("color: #90caf9;")
+        self.token_link_input = QLineEdit()
+        self.token_link_input.setPlaceholderText("Enter token contract address or link...")
+        self.token_link_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #132f4c;
+                border: 1px solid #1e4976;
+                border-radius: 4px;
+                padding: 8px;
+                color: #ffffff;
+            }
+            QLineEdit:focus {
+                border: 1px solid: #2196f3;
+            }
+        """)
+        token_layout.addWidget(token_label)
+        token_layout.addWidget(self.token_link_input)
+        layout.addLayout(token_layout)
+
+        # === POSITION IN % ===
+        position_layout = QHBoxLayout()
+        position_label = QLabel("Position in %:")
+        position_label.setFixedWidth(120)
+        position_label.setStyleSheet("color: #90caf9;")
+        self.position_dropdown = QComboBox()
+        self.position_dropdown.addItems(["25%", "50%", "75%", "100%", "Custom"])
+        self.position_dropdown.setStyleSheet("""
+            QComboBox {
+                background-color: #132f4c;
+                border: 1px solid #1e4976;
+                border-radius: 4px;
+                padding: 8px;
+                color: #ffffff;
+                min-width: 120px;
+            }
+            QComboBox:hover {
+                border: 1px solid #2196f3;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 6px solid #90caf9;
+                margin-right: 5px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #132f4c;
+                border: 1px solid #1e4976;
+                selection-background-color: #1976d2;
+                color: #ffffff;
+            }
+        """)
+        position_layout.addWidget(position_label)
+        position_layout.addWidget(self.position_dropdown)
+
+        # Custom % input (initially hidden)
+        self.custom_position_input = QLineEdit()
+        self.custom_position_input.setPlaceholderText("Enter custom %...")
+        self.custom_position_input.setFixedWidth(150)
+        self.custom_position_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #132f4c;
+                border: 1px solid #1e4976;
+                border-radius: 4px;
+                padding: 8px;
+                color: #ffffff;
+            }
+            QLineEdit:focus {
+                border: 1px solid #2196f3;
+            }
+        """)
+        self.custom_position_input.hide()  # Hidden by default
+        position_layout.addWidget(self.custom_position_input)
+
+        position_layout.addStretch()
+        layout.addLayout(position_layout)
+
+        # Connect dropdown change to show/hide custom input
+        self.position_dropdown.currentTextChanged.connect(self.on_position_dropdown_changed)
+
+        # === TYPE OF ZALIV (MARKET/LIMIT) ===
+        zaliv_layout = QHBoxLayout()
+        zaliv_label = QLabel("Type of Zaliv:")
+        zaliv_label.setFixedWidth(120)
+        zaliv_label.setStyleSheet("color: #90caf9;")
+        zaliv_layout.addWidget(zaliv_label)
+
+        # Radio buttons for Market/Limit
+        self.zaliv_group = QButtonGroup()
+
+        self.market_radio = QRadioButton("Market")
+        self.market_radio.setChecked(True)  # Default
+        self.market_radio.setStyleSheet("QRadioButton { color: #ffffff; }")
+        self.zaliv_group.addButton(self.market_radio, 0)
+        zaliv_layout.addWidget(self.market_radio)
+
+        self.limit_radio = QRadioButton("Limit")
+        self.limit_radio.setStyleSheet("QRadioButton { color: #ffffff; }")
+        self.zaliv_group.addButton(self.limit_radio, 1)
+        zaliv_layout.addWidget(self.limit_radio)
+
+        zaliv_layout.addSpacing(20)
+
+        # Limit price input (initially hidden)
+        limit_price_label = QLabel("Limit Price:")
+        limit_price_label.setStyleSheet("color: #90caf9;")
+        self.limit_price_label = limit_price_label
+        self.limit_price_label.hide()  # Hidden by default
+
+        self.limit_price_input = QLineEdit()
+        self.limit_price_input.setPlaceholderText("Enter limit price...")
+        self.limit_price_input.setFixedWidth(180)
+        self.limit_price_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #132f4c;
+                border: 1px solid #1e4976;
+                border-radius: 4px;
+                padding: 8px;
+                color: #ffffff;
+            }
+            QLineEdit:focus {
+                border: 1px solid #2196f3;
+            }
+        """)
+        self.limit_price_input.hide()  # Hidden by default
+
+        zaliv_layout.addWidget(self.limit_price_label)
+        zaliv_layout.addWidget(self.limit_price_input)
+        zaliv_layout.addStretch()
+        layout.addLayout(zaliv_layout)
+
+        # Connect radio button change to show/hide limit price
+        self.zaliv_group.buttonClicked.connect(self.on_zaliv_type_changed)
+
+        return section
+
+    def on_operation_mode_changed(self, button):
+        """Handle operation mode change - show/hide Short/Long settings"""
+        mode = button.property("mode")
+
+        # Show settings only for Short or Long modes
+        if mode in ["short", "long"]:
+            self.short_long_section.show()
+            # Update title based on mode
+            mode_name = "Short" if mode == "short" else "Long"
+            # Find and update title (first child QLabel)
+            for child in self.short_long_section.findChildren(QLabel):
+                if child.font().bold():
+                    child.setText(f"{mode_name} Trading Settings")
+                    break
+        else:
+            self.short_long_section.hide()
+
+    def on_position_dropdown_changed(self, text):
+        """Show/hide custom position input based on dropdown selection"""
+        if text == "Custom":
+            self.custom_position_input.show()
+            self.custom_position_input.setFocus()
+        else:
+            self.custom_position_input.hide()
+            self.custom_position_input.clear()
+
+    def on_zaliv_type_changed(self, button):
+        """Show/hide limit price input based on Market/Limit selection"""
+        if button == self.limit_radio:
+            self.limit_price_label.show()
+            self.limit_price_input.show()
+            self.limit_price_input.setFocus()
+        else:
+            self.limit_price_label.hide()
+            self.limit_price_input.hide()
+            self.limit_price_input.clear()
+
+    def get_short_long_settings(self):
+        """Get current Short/Long trading settings"""
+        # Get token link
+        token_link = self.token_link_input.text().strip()
+
+        # Get position percentage
+        position_dropdown_value = self.position_dropdown.currentText()
+        if position_dropdown_value == "Custom":
+            position_percent = self.custom_position_input.text().strip()
+        else:
+            position_percent = position_dropdown_value.replace("%", "")
+
+        # Get zaliv type
+        zaliv_type = "Market" if self.market_radio.isChecked() else "Limit"
+
+        # Get limit price if applicable
+        limit_price = ""
+        if zaliv_type == "Limit":
+            limit_price = self.limit_price_input.text().strip()
+
+        return {
+            'token_link': token_link,
+            'position_percent': position_percent,
+            'zaliv_type': zaliv_type,
+            'limit_price': limit_price
+        }
+
+    def validate_short_long_settings(self):
+        """Validate Short/Long settings before execution"""
+        settings = self.get_short_long_settings()
+
+        # Validate token link
+        if not settings['token_link']:
+            QMessageBox.warning(self, "Missing Token Link", "Please enter a token link or contract address")
+            return False
+
+        # Validate position percentage
+        if not settings['position_percent']:
+            QMessageBox.warning(self, "Missing Position", "Please enter a position percentage")
+            return False
+
+        try:
+            position = float(settings['position_percent'])
+            if position <= 0 or position > 100:
+                QMessageBox.warning(self, "Invalid Position", "Position percentage must be between 0 and 100")
+                return False
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Position", "Position percentage must be a valid number")
+            return False
+
+        # Validate limit price if Limit type
+        if settings['zaliv_type'] == "Limit":
+            if not settings['limit_price']:
+                QMessageBox.warning(self, "Missing Limit Price", "Please enter a limit price")
+                return False
+
+            try:
+                price = float(settings['limit_price'])
+                if price <= 0:
+                    QMessageBox.warning(self, "Invalid Limit Price", "Limit price must be greater than 0")
+                    return False
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Limit Price", "Limit price must be a valid number")
+                return False
+
+        return True
 
     def create_logs_section(self):
         """Create logs section"""
@@ -727,7 +1001,25 @@ class MainWindow(QMainWindow):
             self.run_manual_browser_for_selected(selected_rows)
         elif operation_mode == "login":
             self.run_mexc_login_for_selected(selected_rows)
-        elif operation_mode in ["short", "long", "balance", "rk"]:
+        elif operation_mode in ["short", "long"]:
+            # Validate trading settings before proceeding
+            if not self.validate_short_long_settings():
+                return
+
+            # Get trading settings
+            settings = self.get_short_long_settings()
+
+            # Log trading configuration
+            self.log(f"📊 Trading Configuration:")
+            self.log(f"   Token Link: {settings['token_link']}")
+            self.log(f"   Position: {settings['position_percent']}%")
+            self.log(f"   Order Type: {settings['zaliv_type']}")
+            if settings['zaliv_type'] == "Limit":
+                self.log(f"   Limit Price: {settings['limit_price']}")
+
+            # Execute trading operation
+            self.run_short_long_trade(operation_mode, selected_rows, settings)
+        elif operation_mode in ["balance", "rk"]:
             self.log(f"⚠️ Mode '{operation_mode.upper()}' not implemented yet")
             QMessageBox.information(
                 self,
@@ -807,6 +1099,26 @@ class MainWindow(QMainWindow):
                 QApplication.processEvents()
 
         self.log(f"✅ Started {started_count} browser thread(s) - UI remains responsive!")
+
+    def run_short_long_trade(self, mode, selected_rows, settings):
+        """Execute Short/Long trading operation (placeholder)"""
+        self.log(f"📈 Executing {mode.upper()} trade for {len(selected_rows)} profile(s)")
+        self.log(f"⚠️ Trading logic will be implemented in future version")
+        self.log(f"📝 Settings captured:")
+        self.log(f"   - Token: {settings['token_link']}")
+        self.log(f"   - Position: {settings['position_percent']}%")
+        self.log(f"   - Type: {settings['zaliv_type']}")
+        if settings['limit_price']:
+            self.log(f"   - Limit Price: {settings['limit_price']}")
+
+        # TODO: Implement actual trading logic here
+        # This is where you would:
+        # 1. Open browser for each profile
+        # 2. Navigate to trading page
+        # 3. Find token by link/address
+        # 4. Set position size based on percentage
+        # 5. Execute Market or Limit order
+        # 6. Monitor trade execution
 
     def on_driver_ready(self, driver, profile_info):
         """Receive Driver from thread and store it"""
