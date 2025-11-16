@@ -741,12 +741,13 @@ class MainWindow(QMainWindow):
     def run_manual_browser_for_selected(self, selected_rows):
         """Open browser manually for selected profiles (synchronous with processEvents)"""
         from PySide6.QtWidgets import QApplication
-        from botasaurus.driver import Driver
+        from botasaurus_driver import Driver
 
         self.log("🖱️ Opening browser(s) in Manual mode...")
         QApplication.processEvents()
 
         for row in selected_rows:
+            email = "Unknown"  # Initialize to prevent undefined variable in except block
             try:
                 email_item = self.profiles_table.item(row, 1)
                 if not email_item:
