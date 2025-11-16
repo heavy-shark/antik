@@ -25,10 +25,15 @@ class MainWindow(QMainWindow):
         self.profile_manager = ProfileManager()
         self.scraper_runner = ScraperRunner(self.profile_manager)
         self.version = "v0.2"
-        self.totp_timers = {}  # Store TOTP update timers for each row
+        self.totp_data = {}  # Store TOTP data for each row: {row: secret}
         self.active_threads = {}  # Store active MexcAuthThread instances by profile name
         self.login_queue = []  # Queue for sequential login processing
         self.current_login_thread = None  # Currently running login thread
+
+        # Single global timer for all TOTP updates (performance optimization)
+        self.global_totp_timer = QTimer()
+        self.global_totp_timer.timeout.connect(self.update_all_totp_codes)
+
         self.init_ui()
 
     def init_ui(self):
@@ -404,10 +409,12 @@ class MainWindow(QMainWindow):
 
     def refresh_profiles_table(self):
         """Refresh profiles table with data from profile manager"""
-        # Stop all existing TOTP timers
-        for timer in self.totp_timers.values():
-            timer.stop()
-        self.totp_timers.clear()
+        # Stop global TOTP timer during refresh
+        self.global_totp_timer.stop()
+        self.totp_data.clear()
+
+        # Disable updates during bulk operation (performance)
+        self.profiles_table.setUpdatesEnabled(False)
 
         # Clear table
         self.profiles_table.setRowCount(0)
@@ -480,11 +487,8 @@ class MainWindow(QMainWindow):
                 totp_item.setFlags(totp_item.flags() & ~Qt.ItemIsEditable)
                 self.profiles_table.setItem(row, 3, totp_item)
 
-                # Start timer to update TOTP every second
-                timer = QTimer()
-                timer.timeout.connect(lambda r=row, s=twofa_secret: self.update_totp_cell(r, s))
-                timer.start(1000)  # Update every second
-                self.totp_timers[row] = timer
+                # Store TOTP secret for this row (global timer will update)
+                self.totp_data[row] = twofa_secret
             else:
                 totp_item = QTableWidgetItem("—")
                 totp_item.setFlags(totp_item.flags() & ~Qt.ItemIsEditable)
@@ -498,6 +502,25 @@ class MainWindow(QMainWindow):
 
             # Connect checkbox to update delete button visibility
             checkbox.stateChanged.connect(self.update_delete_button_visibility)
+
+        # Re-enable updates and refresh display
+        self.profiles_table.setUpdatesEnabled(True)
+
+        # Start global TOTP timer if we have any TOTP codes to update
+        if self.totp_data:
+            self.global_totp_timer.start(1000)  # Update every second
+
+    def update_all_totp_codes(self):
+        """Update all TOTP codes at once (called by global timer)"""
+        # Batch update all TOTP codes in one go (performance)
+        for row, secret in self.totp_data.items():
+            try:
+                totp_text = self.generate_totp_with_timer(secret)
+                item = self.profiles_table.item(row, 3)
+                if item:
+                    item.setText(totp_text)
+            except:
+                pass
 
     def extract_proxy_ip(self, proxy_string):
         """Extract IP address from proxy string"""
@@ -531,16 +554,6 @@ class MainWindow(QMainWindow):
             return f"{code} ({time_remaining}s)"
         except:
             return "Invalid secret"
-
-    def update_totp_cell(self, row, secret):
-        """Update TOTP code in table cell"""
-        try:
-            totp_text = self.generate_totp_with_timer(secret)
-            item = self.profiles_table.item(row, 3)
-            if item:
-                item.setText(totp_text)
-        except:
-            pass
 
     def get_selected_profile_rows(self):
         """Get list of selected profile rows"""
@@ -653,10 +666,23 @@ class MainWindow(QMainWindow):
 
         self.log("📥 Starting Excel import...")
 
+        # Allow UI to update
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
         try:
             success_count, skipped_count, errors = self.profile_manager.import_from_excel(file_path)
 
+            # Allow UI to update after import
+            QApplication.processEvents()
+
+            self.log("🔄 Refreshing profiles table...")
+            QApplication.processEvents()
+
             self.refresh_profiles_table()
+
+            # Allow UI to update after refresh
+            QApplication.processEvents()
 
             result_msg = f"Import Complete!\n\n✅ Successfully imported: {success_count} profiles\n⚠️ Skipped: {skipped_count} profiles"
 
@@ -713,7 +739,9 @@ class MainWindow(QMainWindow):
 
     def run_manual_browser_for_selected(self, selected_rows):
         """Open browser manually for selected profiles"""
+        from PySide6.QtWidgets import QApplication
         self.log("🖱️ Opening browser(s) in Manual mode...")
+        QApplication.processEvents()
 
         for row in selected_rows:
             email_item = self.profiles_table.item(row, 1)
@@ -783,11 +811,16 @@ class MainWindow(QMainWindow):
                 self.log(f"❌ Failed to open browser for {email}: {str(e)}")
                 self.update_profile_status(row, "Failed to open", "#f44336")
 
+            # Allow UI to update between browser launches
+            QApplication.processEvents()
+
         self.log("✅ All selected browsers opened")
 
     def run_mexc_login_for_selected(self, selected_rows):
         """Run MEXC login automation for selected profiles"""
+        from PySide6.QtWidgets import QApplication
         self.log("🔐 Starting MEXC Login automation...")
+        QApplication.processEvents()
 
         # Clear the queue
         self.login_queue = []
@@ -1002,9 +1035,8 @@ class MainWindow(QMainWindow):
                         thread.terminate()
                         thread.wait(1000)
 
-        # Stop all TOTP timers
-        for timer in self.totp_timers.values():
-            timer.stop()
+        # Stop global TOTP timer
+        self.global_totp_timer.stop()
 
         self.log("👋 Application closing...")
 
