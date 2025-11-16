@@ -677,3 +677,82 @@ class MexcAuthThread(QThread):
             # Sleep briefly to allow signals to be processed
             import time
             time.sleep(0.1)
+
+
+class ManualBrowserThread(QThread):
+    """
+    Thread for opening browser in manual mode
+    Uses exec() to keep thread alive and prevent Driver garbage collection
+    """
+    driver_ready = Signal(object, dict)  # (Driver instance, profile_info)
+    log_signal = Signal(str)
+    error_signal = Signal(str, str)  # (email, error_message)
+
+    def __init__(self, scraper_runner, profile_name, email, headless=False):
+        super().__init__()
+        self.scraper_runner = scraper_runner
+        self.profile_name = profile_name
+        self.email = email
+        self.headless = headless
+        self.row = None  # Will be set by caller
+
+    def run(self):
+        """Create browser and keep thread alive"""
+        driver = None
+        try:
+            self.log_signal.emit(f"🔧 Initializing browser for {self.email}...")
+
+            # Get proxy info
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+            if proxy:
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+
+            # Update last used
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver config
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            if proxy:
+                driver_config['proxy'] = proxy
+
+            # Create driver (blocking, but in background thread!)
+            self.log_signal.emit(f"⏳ Creating browser instance...")
+            driver = Driver(**driver_config)
+
+            # Navigate to MEXC
+            self.log_signal.emit(f"🌐 Opening MEXC...")
+            driver.get("https://www.mexc.com/")
+
+            self.log_signal.emit(f"✅ Browser ready for: {self.email}")
+
+            # Transfer Driver to main thread via signal
+            profile_info = {
+                'profile_name': self.profile_name,
+                'email': self.email,
+                'row': self.row
+            }
+            self.driver_ready.emit(driver, profile_info)
+
+            # CRITICAL: Keep thread alive to maintain Driver context
+            # This prevents garbage collection and keeps browser open
+            self.exec()  # Enter event loop - thread stays alive!
+
+        except Exception as e:
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            self.log_signal.emit(f"❌ Failed to open browser: {str(e)}")
+            self.error_signal.emit(self.email, error_msg)
+
+            # Clean up driver if created
+            if driver:
+                try:
+                    driver.close()
+                except:
+                    pass
+
+    def stop(self):
+        """Stop the thread's event loop"""
+        self.quit()  # Exit exec() loop
