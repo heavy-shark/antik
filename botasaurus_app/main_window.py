@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
-from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread, ManualBrowserThread
+from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread
 import json
 import pyotp
 import time
@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
         self.active_threads = {}  # Store active threads (login/manual) by profile name
         self.login_queue = []  # Queue for sequential login processing
         self.current_login_thread = None  # Currently running login thread
-        self.manual_browser_threads = {}  # Store active ManualBrowserThread instances
+        self.active_drivers = {}  # Store active Driver instances to prevent garbage collection
 
         # Single global timer for all TOTP updates (performance optimization)
         self.global_totp_timer = QTimer()
@@ -739,82 +739,97 @@ class MainWindow(QMainWindow):
             self.log(f"❌ Unknown mode: {operation_mode}")
 
     def run_manual_browser_for_selected(self, selected_rows):
-        """Open browser manually for selected profiles using threads (non-blocking)"""
+        """Open browser manually for selected profiles (synchronous with processEvents)"""
         from PySide6.QtWidgets import QApplication
+        from botasaurus.driver import Driver
+
         self.log("🖱️ Opening browser(s) in Manual mode...")
         QApplication.processEvents()
 
         for row in selected_rows:
-            email_item = self.profiles_table.item(row, 1)
-            if not email_item:
-                continue
+            try:
+                email_item = self.profiles_table.item(row, 1)
+                if not email_item:
+                    continue
 
-            email = email_item.text()
+                email = email_item.text()
 
-            # Find profile by email
-            profile_name = None
-            profiles = self.profile_manager.get_all_profiles()
-            for name in profiles:
-                info = self.profile_manager.get_profile_info(name)
-                if info and info.get('email') == email:
-                    profile_name = name
-                    break
+                # Find profile by email
+                profile_name = None
+                profiles = self.profile_manager.get_all_profiles()
+                for name in profiles:
+                    info = self.profile_manager.get_profile_info(name)
+                    if info and info.get('email') == email:
+                        profile_name = name
+                        break
 
-            if not profile_name:
-                self.log(f"❌ Profile not found for email: {email}")
-                continue
+                if not profile_name:
+                    self.log(f"❌ Profile not found for email: {email}")
+                    continue
 
-            # Update status to "Opening..."
-            self.update_profile_status(row, "Opening...", "#2196f3")
-            self.log(f"▶️ Starting browser thread for: {email}")
+                # Update status to "Opening..."
+                self.update_profile_status(row, "Opening...", "#2196f3")
+                QApplication.processEvents()
 
-            # Create and start ManualBrowserThread (non-blocking!)
-            thread = ManualBrowserThread(
-                self.scraper_runner,
-                profile_name,
-                email,
-                headless=False
-            )
+                self.log(f"🔧 Initializing browser for: {email}")
+                QApplication.processEvents()
 
-            # Store thread reference
-            self.manual_browser_threads[profile_name] = {
-                'thread': thread,
-                'row': row,
-                'email': email
-            }
+                # Get proxy info
+                proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(profile_name)
+                if proxy:
+                    self.log(f"🌐 Using proxy: {proxy_display}")
+                    QApplication.processEvents()
 
-            # Connect signals
-            thread.log_signal.connect(self.log)
-            thread.finished.connect(lambda success, result, pn=profile_name: self.on_manual_browser_finished(success, result, pn))
+                # Update last used timestamp
+                self.profile_manager.update_last_used(profile_name)
 
-            # Also connect to thread finished signal for cleanup
-            thread.finished.connect(lambda: thread.deleteLater())
+                # Create driver configuration
+                driver_config = {
+                    'profile': profile_name,
+                    'headless': False
+                }
 
-            # Start thread (non-blocking!)
-            thread.start()
+                if proxy:
+                    driver_config['proxy'] = proxy
 
-            # Allow UI to update
-            QApplication.processEvents()
+                # Create driver (this may take a few seconds)
+                self.log(f"⏳ Creating browser instance for: {email}...")
+                QApplication.processEvents()
 
-        self.log(f"✅ Started {len(selected_rows)} browser thread(s) - UI remains responsive!")
+                driver = Driver(**driver_config)
 
-    def on_manual_browser_finished(self, success, result, profile_name):
-        """Handle manual browser thread completion"""
-        thread_info = self.manual_browser_threads.get(profile_name)
-        if not thread_info:
-            return
+                # IMPORTANT: Store driver reference to prevent garbage collection
+                self.active_drivers[profile_name] = {
+                    'driver': driver,
+                    'email': email,
+                    'row': row
+                }
 
-        row = thread_info['row']
-        email = thread_info['email']
+                QApplication.processEvents()
 
-        if success:
-            self.update_profile_status(row, "Open (Manual)", "#4caf50")
-        else:
-            self.update_profile_status(row, "Failed to open", "#f44336")
+                # Navigate to MEXC homepage
+                self.log(f"🌐 Opening MEXC for: {email}...")
+                QApplication.processEvents()
 
-        # Remove thread from active threads
-        if profile_name in self.manual_browser_threads:
-            del self.manual_browser_threads[profile_name]
+                driver.get("https://www.mexc.com/")
+
+                QApplication.processEvents()
+
+                # Update status to success
+                self.update_profile_status(row, "Open (Manual)", "#4caf50")
+                self.log(f"✅ Browser opened successfully for: {email}")
+
+                QApplication.processEvents()
+
+            except Exception as e:
+                import traceback
+                error_msg = f"Failed to open browser for {email}: {str(e)}"
+                self.log(f"❌ {error_msg}")
+                self.log(traceback.format_exc())
+                self.update_profile_status(row, "Failed to open", "#f44336")
+                QApplication.processEvents()
+
+        self.log(f"✅ Finished opening {len(selected_rows)} browser(s)!")
 
     def run_mexc_login_for_selected(self, selected_rows):
         """Run MEXC login automation for selected profiles"""
@@ -1034,6 +1049,21 @@ class MainWindow(QMainWindow):
                         self.log(f"⚠️ Force terminating thread: {thread_info['email']}")
                         thread.terminate()
                         thread.wait(1000)
+
+        # Close all active browsers
+        if self.active_drivers:
+            self.log("🌐 Closing active browsers...")
+            for profile_name, driver_info in list(self.active_drivers.items()):
+                try:
+                    driver = driver_info['driver']
+                    email = driver_info['email']
+                    self.log(f"🔒 Closing browser for: {email}")
+                    driver.close()
+                except Exception as e:
+                    self.log(f"⚠️ Error closing browser: {str(e)}")
+
+            # Clear the dictionary
+            self.active_drivers.clear()
 
         # Stop global TOTP timer
         self.global_totp_timer.stop()
