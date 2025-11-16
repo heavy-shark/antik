@@ -1080,13 +1080,23 @@ class ShortLongTradeThread(QThread):
 
     def type_limit_price_human_like(self, driver, price):
         """
-        Human-like typing into limit price input
+        EMULATE REAL USER BEHAVIOR - Type limit price like a human
 
-        Process:
-        1. Find input.ant-input[type="text"]
-        2. Click it
-        3. Backspace 8-12 times (clear old value)
-        4. Type new price character by character with delays (80-140ms)
+        From screenshots, the correct input structure is:
+        <span class="ant-input-affix-wrapper InputNumberExtend_input-main__StKNb">
+          <input autocomplete="off" class="ant-input" type="text" value="{price}">
+        </span>
+
+        When focused, wrapper gets "ant-input-affix-wrapper-focused" class
+        and USD conversion div appears: <div class="InputNumberExtend_flat__3tU12">
+
+        Process (REAL USER SIMULATION):
+        1. Find EXACT input: span.InputNumberExtend_input-main__StKNb input
+        2. Click to focus (triggers focused state)
+        3. Triple-click OR Ctrl+A to select all text
+        4. Type new price character-by-character with human delays
+        5. React will show USD conversion automatically
+        6. Blur to finalize
 
         Args:
             driver: Botasaurus Driver instance
@@ -1096,140 +1106,239 @@ class ShortLongTradeThread(QThread):
             bool: True if successful, False otherwise
         """
         try:
-            self.log_signal.emit(f"💰 Typing limit price: {price}")
+            import random
 
-            # STEP 1: Find and click input
-            find_input_js = """
+            self.log_signal.emit(f"💰 Entering limit price: {price}")
+
+            # STEP 1: Find EXACT input field
+            find_and_focus_js = """
             (function() {
-                // Find input in limit order section
-                var inputs = document.querySelectorAll('input.ant-input[type="text"]');
+                // Find the EXACT limit price input using wrapper class
+                var wrapper = document.querySelector('span.InputNumberExtend_input-main__StKNb');
 
-                // Find FIRST visible input
-                for (var i = 0; i < inputs.length; i++) {
-                    var rect = inputs[i].getBoundingClientRect();
-                    var isVisible = rect.width > 0 && rect.height > 0 &&
-                                   window.getComputedStyle(inputs[i]).visibility !== 'hidden' &&
-                                   window.getComputedStyle(inputs[i]).display !== 'none';
-
-                    if (isVisible) {
-                        // Mark this input for later operations
-                        inputs[i].setAttribute('data-price-input', 'true');
-
-                        // Click it (simulating hover + click)
-                        inputs[i].focus();
-                        inputs[i].click();
-
-                        return true;
-                    }
+                if (!wrapper) {
+                    // Fallback: try finding by full class chain
+                    wrapper = document.querySelector('span.ant-input-affix-wrapper.InputNumberExtend_input-main__StKNb');
                 }
 
-                return false;
+                if (!wrapper) return false;
+
+                // Get the input inside this wrapper
+                var input = wrapper.querySelector('input.ant-input[type="text"]');
+                if (!input) return false;
+
+                // Check if input is visible
+                var rect = input.getBoundingClientRect();
+                var isVisible = rect.width > 0 && rect.height > 0;
+                if (!isVisible) return false;
+
+                // Mark this input for operations
+                input.setAttribute('data-limit-price-input', 'true');
+
+                // Scroll into view
+                input.scrollIntoView({block: 'center', behavior: 'instant'});
+
+                return true;
             })();
             """
 
-            result = driver.run_js(find_input_js)
+            result = driver.run_js(find_and_focus_js)
             if not result:
-                self.log_signal.emit("⚠️ Could not find limit price input")
+                self.log_signal.emit("⚠️ Could not find limit price input field")
                 return False
 
-            driver.sleep(0.3)  # Wait after click
+            driver.sleep(0.5)
 
-            # STEP 2: Backspace 10 times to clear old value
-            self.log_signal.emit("🔙 Clearing old price (Backspace)...")
-            for i in range(10):
-                backspace_js = """
-                (function() {
-                    var input = document.querySelector('input[data-price-input="true"]');
-                    if (!input) return false;
+            # STEP 2: Click to focus the input (REAL USER ACTION)
+            click_input_js = """
+            (function() {
+                var input = document.querySelector('input[data-limit-price-input="true"]');
+                if (!input) return false;
 
-                    // Simulate backspace key
-                    var event = new KeyboardEvent('keydown', {
-                        key: 'Backspace',
-                        code: 'Backspace',
-                        keyCode: 8,
-                        bubbles: true,
-                        cancelable: true
-                    });
-                    input.dispatchEvent(event);
+                // Get center coordinates
+                var rect = input.getBoundingClientRect();
+                var centerX = rect.left + (rect.width / 2);
+                var centerY = rect.top + (rect.height / 2);
 
-                    // Remove last character
-                    if (input.value.length > 0) {
-                        input.value = input.value.slice(0, -1);
-                    }
+                // Dispatch mousedown at center
+                var mousedown = new MouseEvent('mousedown', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: centerX,
+                    clientY: centerY
+                });
+                input.dispatchEvent(mousedown);
 
-                    // Trigger input event for React
-                    var inputEvent = new Event('input', {bubbles: true, cancelable: true});
-                    input.dispatchEvent(inputEvent);
+                // Focus the input
+                input.focus();
 
-                    return true;
-                })();
-                """
-                driver.run_js(backspace_js)
-                driver.sleep(0.05)  # 50ms delay between backspaces
+                // Dispatch mouseup
+                var mouseup = new MouseEvent('mouseup', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: centerX,
+                    clientY: centerY
+                });
+                input.dispatchEvent(mouseup);
 
-            driver.sleep(0.2)  # Pause after clearing
+                // Click event
+                var click = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: centerX,
+                    clientY: centerY
+                });
+                input.dispatchEvent(click);
 
-            # STEP 3: Type each character with human-like delay
+                return true;
+            })();
+            """
+
+            result = driver.run_js(click_input_js)
+            if not result:
+                self.log_signal.emit("⚠️ Could not click input field")
+                return False
+
+            driver.sleep(0.3)
+
+            # STEP 3: Select all existing text (Ctrl+A simulation)
+            self.log_signal.emit("🔍 Selecting existing text...")
+
+            select_all_js = """
+            (function() {
+                var input = document.querySelector('input[data-limit-price-input="true"]');
+                if (!input) return false;
+
+                // Select all text (like Ctrl+A)
+                input.select();
+                input.setSelectionRange(0, input.value.length);
+
+                return true;
+            })();
+            """
+
+            driver.run_js(select_all_js)
+            driver.sleep(0.2)
+
+            # STEP 4: Clear selected text and type new price character by character
             self.log_signal.emit(f"⌨️ Typing '{price}' character by character...")
+
+            # First, clear the field
+            clear_js = """
+            (function() {
+                var input = document.querySelector('input[data-limit-price-input="true"]');
+                if (!input) return false;
+
+                // Clear value
+                input.value = '';
+
+                // Trigger input event for React
+                var inputEvent = new Event('input', {bubbles: true, cancelable: true});
+                input.dispatchEvent(inputEvent);
+
+                return true;
+            })();
+            """
+
+            driver.run_js(clear_js)
+            driver.sleep(0.15)
+
+            # Type each character with human-like delays
             for char in price:
                 type_char_js = f"""
                 (function() {{
-                    var input = document.querySelector('input[data-price-input="true"]');
+                    var input = document.querySelector('input[data-limit-price-input="true"]');
                     if (!input) return false;
 
-                    // Simulate keypress
-                    var event = new KeyboardEvent('keydown', {{
+                    // Simulate keydown event
+                    var keydownEvent = new KeyboardEvent('keydown', {{
                         key: '{char}',
-                        code: 'Digit{char}' if '{char}'.isdigit() else 'Key{char.upper()}',
+                        code: 'Digit{char}',
+                        keyCode: {ord(char)},
+                        which: {ord(char)},
                         bubbles: true,
                         cancelable: true
                     }});
-                    input.dispatchEvent(event);
+                    input.dispatchEvent(keydownEvent);
 
-                    // Add character
+                    // Simulate keypress event
+                    var keypressEvent = new KeyboardEvent('keypress', {{
+                        key: '{char}',
+                        code: 'Digit{char}',
+                        keyCode: {ord(char)},
+                        which: {ord(char)},
+                        charCode: {ord(char)},
+                        bubbles: true,
+                        cancelable: true
+                    }});
+                    input.dispatchEvent(keypressEvent);
+
+                    // Add character to value
                     input.value += '{char}';
 
-                    // Trigger input event for React
+                    // Trigger input event for React (this will update USD conversion)
                     var inputEvent = new Event('input', {{bubbles: true, cancelable: true}});
                     input.dispatchEvent(inputEvent);
+
+                    // Simulate keyup event
+                    var keyupEvent = new KeyboardEvent('keyup', {{
+                        key: '{char}',
+                        code: 'Digit{char}',
+                        keyCode: {ord(char)},
+                        which: {ord(char)},
+                        bubbles: true,
+                        cancelable: true
+                    }});
+                    input.dispatchEvent(keyupEvent);
 
                     return true;
                 }})();
                 """
-                driver.run_js(type_char_js)
 
-                # Random delay between 80-140ms (human-like)
-                import random
+                result = driver.run_js(type_char_js)
+                if not result:
+                    self.log_signal.emit(f"⚠️ Failed to type character: {char}")
+                    return False
+
+                # Human-like random delay between keystrokes (80-140ms)
                 delay = random.uniform(0.08, 0.14)
                 driver.sleep(delay)
 
-            # STEP 4: Finalize input
+            driver.sleep(0.3)
+
+            # STEP 5: Finalize input (trigger change and blur)
+            self.log_signal.emit(f"✓ Finalizing price entry...")
+
             finalize_js = """
             (function() {
-                var input = document.querySelector('input[data-price-input="true"]');
+                var input = document.querySelector('input[data-limit-price-input="true"]');
                 if (!input) return false;
 
                 // Trigger change event
                 var changeEvent = new Event('change', {bubbles: true, cancelable: true});
                 input.dispatchEvent(changeEvent);
 
-                // Blur to finalize
+                // Blur to finalize (this will hide the focused state and USD div)
                 input.blur();
 
                 // Clean up marker
-                input.removeAttribute('data-price-input');
+                input.removeAttribute('data-limit-price-input');
 
                 return true;
             })();
             """
-            driver.run_js(finalize_js)
 
-            driver.sleep(0.5)  # Wait for value to be processed
-            self.log_signal.emit(f"✓ Limit price entered: {price}")
+            driver.run_js(finalize_js)
+            driver.sleep(0.5)
+
+            self.log_signal.emit(f"✅ Limit price entered successfully: {price}")
             return True
 
         except Exception as e:
-            self.log_signal.emit(f"⚠️ Type price error: {str(e)[:100]}")
+            self.log_signal.emit(f"❌ Type price error: {str(e)[:150]}")
             return False
 
     def select_tab(self, driver, tab_name_variants):
