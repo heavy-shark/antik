@@ -942,6 +942,184 @@ class ShortLongTradeThread(QThread):
             self.log_signal.emit(f"⚠️ Position slider click failed: {str(e)[:100]}")
             return False
 
+    def get_selected_tab_text(self, driver):
+        """
+        Get text of currently selected tab (aria-selected="true")
+
+        Returns:
+            str: Text content of selected tab, or empty string if none found
+        """
+        try:
+            check_js = """
+            (function() {
+                // Find any tab with aria-selected="true"
+                var selectedTabs = document.querySelectorAll('[role="tab"][aria-selected="true"]');
+
+                if (selectedTabs.length > 0) {
+                    var tab = selectedTabs[0];
+                    var text = tab.textContent || tab.innerText || '';
+                    return text.trim();
+                }
+
+                return '';
+            })();
+            """
+
+            result = driver.run_js(check_js)
+            return result if result else ''
+
+        except Exception as e:
+            return ''
+
+    def is_tab_already_selected(self, driver, text_variants):
+        """
+        Check if any of the text variants matches currently selected tab
+
+        Args:
+            driver: Botasaurus Driver instance
+            text_variants: List of text strings (e.g., ['Лимит', 'Limit'])
+
+        Returns:
+            bool: True if tab already selected, False otherwise
+        """
+        try:
+            if isinstance(text_variants, str):
+                text_variants = [text_variants]
+
+            selected_text = self.get_selected_tab_text(driver)
+            if not selected_text:
+                return False
+
+            # Check if selected tab text contains any of our variants
+            for variant in text_variants:
+                if variant.lower() in selected_text.lower():
+                    self.log_signal.emit(f"ℹ️ Tab already selected: {selected_text}")
+                    return True
+
+            return False
+
+        except Exception as e:
+            return False
+
+    def find_and_click_single(self, driver, text_variants, check_tab_state=False):
+        """
+        UNIVERSAL SINGLE-CLICK FUNCTION
+
+        Searches ALL element types and text variants in ONE pass
+        Clicks ONLY FIRST visible match
+        Optionally checks tab state before clicking
+
+        Args:
+            driver: Botasaurus Driver instance
+            text_variants: List of text strings to search (e.g., ['Шорт', 'Short'])
+            check_tab_state: If True, skip if tab already selected
+
+        Returns:
+            bool: True if clicked or already selected, False otherwise
+        """
+        try:
+            if isinstance(text_variants, str):
+                text_variants = [text_variants]
+
+            # Check tab state first if requested
+            if check_tab_state:
+                if self.is_tab_already_selected(driver, text_variants):
+                    return True
+
+            # Build JavaScript that searches ALL elements in ONE pass
+            text_list = "', '".join(text_variants)
+
+            single_click_js = f"""
+            (function() {{
+                var searchTexts = ['{text_list}'];
+
+                // Get ALL elements (buttons, divs, spans, etc.)
+                var allElements = document.querySelectorAll('*');
+
+                // Search for FIRST matching element
+                for (var i = 0; i < allElements.length; i++) {{
+                    var elem = allElements[i];
+                    var text = elem.textContent || elem.innerText || '';
+
+                    // Check if matches ANY search text
+                    var matched = false;
+                    for (var j = 0; j < searchTexts.length; j++) {{
+                        if (text.includes(searchTexts[j])) {{
+                            matched = true;
+                            break;
+                        }}
+                    }}
+
+                    if (!matched) continue;
+
+                    // Check visibility
+                    var rect = elem.getBoundingClientRect();
+                    var isVisible = rect.width > 0 && rect.height > 0 &&
+                                   window.getComputedStyle(elem).visibility !== 'hidden' &&
+                                   window.getComputedStyle(elem).display !== 'none';
+
+                    if (!isVisible) continue;
+
+                    // FOUND! Scroll into view
+                    elem.scrollIntoView({{block: 'center', behavior: 'instant'}});
+
+                    // Wait for scroll, then click at exact coordinates
+                    setTimeout(function() {{
+                        var freshRect = elem.getBoundingClientRect();
+                        var centerX = freshRect.left + (freshRect.width / 2);
+                        var centerY = freshRect.top + (freshRect.height / 2);
+
+                        // Dispatch full mouse event sequence
+                        var mousedown = new MouseEvent('mousedown', {{
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: centerX,
+                            clientY: centerY
+                        }});
+
+                        var mouseup = new MouseEvent('mouseup', {{
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: centerX,
+                            clientY: centerY
+                        }});
+
+                        var click = new MouseEvent('click', {{
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: centerX,
+                            clientY: centerY
+                        }});
+
+                        elem.dispatchEvent(mousedown);
+                        elem.dispatchEvent(mouseup);
+                        elem.dispatchEvent(click);
+                        elem.click();
+                    }}, 300);
+
+                    return true;  // STOP IMMEDIATELY AFTER FIRST MATCH
+                }}
+
+                return false;
+            }})();
+            """
+
+            result = driver.run_js(single_click_js)
+
+            if result:
+                driver.sleep(1.5)  # Wait for click to process
+                self.log_signal.emit(f"✓ Clicked: {text_variants[0]}")
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            self.log_signal.emit(f"⚠️ Click failed: {str(e)[:100]}")
+            return False
+
     def find_and_click_by_texts(self, driver, text_variants, element_type='*'):
         """
         Find element by multiple text variants and click ONCE at exact coordinates
@@ -1374,97 +1552,90 @@ class ShortLongTradeThread(QThread):
             driver.sleep(7)  # 7 second delay BEFORE searching for tab
 
             if self.settings['zaliv_type'] == "Limit":
-                # Click "Лимит" / "Limit" tab
+                # Select Limit tab - check if already selected first
                 try:
-                    self.log_signal.emit("🔍 Searching for Limit tab...")
+                    self.log_signal.emit("🔍 Checking Limit tab...")
 
-                    # Try to click Limit tab (try BOTH Russian and English)
-                    clicked = False
-
-                    # Try Russian "Лимит" first
-                    self.log_signal.emit("🔍 Trying Russian 'Лимит'...")
-                    clicked = self.find_and_click_by_text(driver, 'Лимит', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Лимит', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Лимит', 'span')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Лимит', '*')
-
-                    # Try English "Limit" if Russian didn't work
-                    if not clicked:
-                        self.log_signal.emit("🔍 Trying English 'Limit'...")
-                        clicked = self.find_and_click_by_text(driver, 'Limit', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Limit', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Limit', 'span')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Limit', '*')
+                    # Use universal single-click with tab state check
+                    clicked = self.find_and_click_single(
+                        driver,
+                        ['Лимит', 'Limit'],
+                        check_tab_state=True  # Checks aria-selected before clicking
+                    )
 
                     if clicked:
-                        self.log_signal.emit("✓ Limit tab clicked!")
-                        driver.sleep(7)  # 7 second delay after clicking Limit tab
+                        self.log_signal.emit("✓ Limit tab selected")
+                        driver.sleep(7)  # 7 second delay after selecting tab
                         self.log_signal.emit("✓ Selected Limit order type")
                     else:
-                        self.log_signal.emit("⚠️ Could not find or click Limit tab (tried both Russian and English)")
+                        self.log_signal.emit("⚠️ Could not find Limit tab")
                 except Exception as e:
-                    self.log_signal.emit(f"⚠️ Could not find Limit tab: {e}")
+                    self.log_signal.emit(f"⚠️ Limit tab error: {e}")
 
                 # Enter limit price
                 self.log_signal.emit(f"💰 Entering limit price: {self.settings['limit_price']}")
                 driver.sleep(7)  # 7 second delay BEFORE searching for input
 
-                # Use JavaScript to target EXACT input field, clear it, and type new value
+                # Target EXACT input inside InputNumberExtend_input-main wrapper
                 try:
                     limit_price = self.settings['limit_price']
 
-                    # JavaScript to find, focus, clear, and type into the EXACT input
+                    # JavaScript to find, clear, and type - targeting wrapper > input
                     enter_price_js = f"""
                     (function() {{
-                        // Target the EXACT input field by specific class
-                        var input = document.querySelector('.ant-input.InputNumberExtend_input-main__StKNb');
+                        // Find wrapper with specific class, then get input inside
+                        var wrapper = document.querySelector('.InputNumberExtend_input-main__StKNb');
+                        var input = null;
 
+                        if (wrapper) {{
+                            // Get input.ant-input inside wrapper
+                            input = wrapper.querySelector('input.ant-input[type="text"]');
+                        }}
+
+                        // Fallback: find by parent span class
                         if (!input) {{
-                            // Fallback: try just the specific class
-                            input = document.querySelector('.InputNumberExtend_input-main__StKNb');
+                            var spans = document.querySelectorAll('span.ant-input-affix-wrapper.InputNumberExtend_input-main__StKNb');
+                            for (var i = 0; i < spans.length; i++) {{
+                                var candidate = spans[i].querySelector('input.ant-input[type="text"]');
+                                if (candidate) {{
+                                    input = candidate;
+                                    break;
+                                }}
+                            }}
                         }}
 
                         if (!input) {{
                             return false;
                         }}
 
-                        // Focus the input
+                        // Focus input
                         input.focus();
 
-                        // Select all existing text
-                        input.select();
+                        // Select all text (Ctrl+A equivalent)
+                        input.setSelectionRange(0, input.value.length);
 
-                        // Clear the value
+                        // Clear value
                         input.value = '';
 
-                        // Dispatch input event to trigger React/Vue handlers
-                        var inputEvent = new Event('input', {{ bubbles: true }});
+                        // Trigger input event for React
+                        var inputEvent = new Event('input', {{ bubbles: true, cancelable: true }});
                         input.dispatchEvent(inputEvent);
 
-                        // Small delay then type new value
+                        // Wait then type new value
                         setTimeout(function() {{
                             input.value = '{limit_price}';
 
-                            // Trigger input event again
-                            var inputEvent2 = new Event('input', {{ bubbles: true }});
+                            // Trigger input event
+                            var inputEvent2 = new Event('input', {{ bubbles: true, cancelable: true }});
                             input.dispatchEvent(inputEvent2);
 
                             // Trigger change event
-                            var changeEvent = new Event('change', {{ bubbles: true }});
+                            var changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
                             input.dispatchEvent(changeEvent);
-                        }}, 100);
+
+                            // Blur to finalize
+                            input.blur();
+                        }}, 150);
 
                         return true;
                     }})();
@@ -1473,58 +1644,35 @@ class ShortLongTradeThread(QThread):
                     result = driver.run_js(enter_price_js)
 
                     if result:
-                        driver.sleep(1)  # Wait for value to be processed
+                        driver.sleep(1.5)  # Wait for value to be processed
                         self.log_signal.emit(f"✓ Limit price entered: {limit_price}")
                         driver.sleep(7)  # 7 second delay after entering limit price
                     else:
-                        self.log_signal.emit(f"⚠️ Could not find exact limit price input field")
+                        self.log_signal.emit(f"⚠️ Could not find limit price input field")
 
                 except Exception as e:
                     self.log_signal.emit(f"⚠️ Could not enter limit price: {e}")
 
             else:  # Market order
-                # Click "Маркет" / "Market" tab
+                # Select Market tab - check if already selected first
                 try:
-                    self.log_signal.emit("🔍 Searching for Market tab...")
+                    self.log_signal.emit("🔍 Checking Market tab...")
 
-                    # Try to click Market tab (try BOTH Russian and English)
-                    clicked = False
-
-                    # Try Russian "Маркет" first
-                    self.log_signal.emit("🔍 Trying Russian 'Маркет'...")
-                    clicked = self.find_and_click_by_text(driver, 'Маркет', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Маркет', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Маркет', 'span')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Маркет', '*')
-
-                    # Try English "Market" if Russian didn't work
-                    if not clicked:
-                        self.log_signal.emit("🔍 Trying English 'Market'...")
-                        clicked = self.find_and_click_by_text(driver, 'Market', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Market', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Market', 'span')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Market', '*')
+                    # Use universal single-click with tab state check
+                    clicked = self.find_and_click_single(
+                        driver,
+                        ['Маркет', 'Market', 'Рынок'],
+                        check_tab_state=True  # Checks aria-selected before clicking
+                    )
 
                     if clicked:
-                        self.log_signal.emit("✓ Market tab clicked!")
-                        driver.sleep(7)  # 7 second delay after clicking Market tab
+                        self.log_signal.emit("✓ Market tab selected")
+                        driver.sleep(7)  # 7 second delay after selecting tab
                         self.log_signal.emit("✓ Selected Market order type")
                     else:
-                        self.log_signal.emit("⚠️ Could not find or click Market tab (tried both Russian and English)")
+                        self.log_signal.emit("⚠️ Could not find Market tab")
                 except Exception as e:
-                    self.log_signal.emit(f"⚠️ Could not find Market tab: {e}")
+                    self.log_signal.emit(f"⚠️ Market tab error: {e}")
 
             # === STEP 2: Select Position Percentage ===
             position = self.settings['position_percent']
@@ -1577,43 +1725,23 @@ class ShortLongTradeThread(QThread):
                     self.log_signal.emit("🚀 Executing LONG trade...")
                     self.log_signal.emit("🔍 Searching for LONG execute button...")
 
-                    # Try ALL variants in ONE call - clicks only FIRST match
-                    # First try button elements with all text variants
-                    clicked = self.find_and_click_by_texts(
+                    # SINGLE CALL - searches ALL elements, clicks ONLY FIRST match
+                    clicked = self.find_and_click_single(
                         driver,
-                        ['Открыть Лонг', 'Лонг', 'Open Long', 'Long'],
-                        'button'
+                        ['Открыть Лонг', 'Лонг', 'Open Long', 'Long']
+                        # No check_tab_state - buttons don't have aria-selected
                     )
-
-                    # If button not found, try any element type
-                    if not clicked:
-                        self.log_signal.emit("🔍 Trying all element types...")
-                        clicked = self.find_and_click_by_texts(
-                            driver,
-                            ['Открыть Лонг', 'Лонг', 'Open Long', 'Long'],
-                            '*'
-                        )
 
                 else:  # short
                     self.log_signal.emit("🚀 Executing SHORT trade...")
                     self.log_signal.emit("🔍 Searching for SHORT execute button...")
 
-                    # Try ALL variants in ONE call - clicks only FIRST match
-                    # First try button elements with all text variants
-                    clicked = self.find_and_click_by_texts(
+                    # SINGLE CALL - searches ALL elements, clicks ONLY FIRST match
+                    clicked = self.find_and_click_single(
                         driver,
-                        ['Открыть Шорт', 'Шорт', 'Open Short', 'Short'],
-                        'button'
+                        ['Открыть Шорт', 'Шорт', 'Open Short', 'Short']
+                        # No check_tab_state - buttons don't have aria-selected
                     )
-
-                    # If button not found, try any element type
-                    if not clicked:
-                        self.log_signal.emit("🔍 Trying all element types...")
-                        clicked = self.find_and_click_by_texts(
-                            driver,
-                            ['Открыть Шорт', 'Шорт', 'Open Short', 'Short'],
-                            '*'
-                        )
 
                 if clicked:
                     self.log_signal.emit("✓ Execute button clicked!")
@@ -1624,26 +1752,11 @@ class ShortLongTradeThread(QThread):
                     try:
                         self.log_signal.emit("🔍 Looking for confirmation button...")
 
-                        # Try Russian "Подтвердить" first
-                        confirm_clicked = self.find_and_click_by_text(driver, 'Подтвердить', 'button')
-
-                        if not confirm_clicked:
-                            confirm_clicked = self.find_and_click_by_text(driver, 'Подтвердить', '*')
-
-                        # Try English "Confirm" if Russian didn't work
-                        if not confirm_clicked:
-                            self.log_signal.emit("🔍 Trying English 'Confirm'...")
-                            confirm_clicked = self.find_and_click_by_text(driver, 'Confirm', 'button')
-
-                        if not confirm_clicked:
-                            confirm_clicked = self.find_and_click_by_text(driver, 'Confirm', '*')
-
-                        # Try common alternatives
-                        if not confirm_clicked:
-                            confirm_clicked = self.find_and_click_by_text(driver, 'OK', 'button')
-
-                        if not confirm_clicked:
-                            confirm_clicked = self.find_and_click_by_text(driver, 'Yes', 'button')
+                        # SINGLE CALL - all text variants, all element types
+                        confirm_clicked = self.find_and_click_single(
+                            driver,
+                            ['Подтвердить', 'Confirm', 'OK', 'Yes', 'Да']
+                        )
 
                         if confirm_clicked:
                             self.log_signal.emit("✓ Confirmation button clicked!")
