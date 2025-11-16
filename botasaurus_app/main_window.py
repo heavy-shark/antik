@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
-from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread, ManualBrowserThread
+from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread, ManualBrowserThread, ShortLongTradeThread
 import json
 import pyotp
 import time
@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         self.active_threads = {}  # Store active threads (login) by profile name - PARALLEL execution
         self.active_drivers = {}  # Store active Driver instances to prevent garbage collection
         self.active_browser_threads = {}  # Store ManualBrowserThread instances with exec()
+        self.active_trade_threads = {}  # Store ShortLongTradeThread instances
 
         # Single global timer for all TOTP updates (performance optimization)
         self.global_totp_timer = QTimer()
@@ -1101,24 +1102,77 @@ class MainWindow(QMainWindow):
         self.log(f"✅ Started {started_count} browser thread(s) - UI remains responsive!")
 
     def run_short_long_trade(self, mode, selected_rows, settings):
-        """Execute Short/Long trading operation (placeholder)"""
-        self.log(f"📈 Executing {mode.upper()} trade for {len(selected_rows)} profile(s)")
-        self.log(f"⚠️ Trading logic will be implemented in future version")
-        self.log(f"📝 Settings captured:")
-        self.log(f"   - Token: {settings['token_link']}")
-        self.log(f"   - Position: {settings['position_percent']}%")
-        self.log(f"   - Type: {settings['zaliv_type']}")
-        if settings['limit_price']:
-            self.log(f"   - Limit Price: {settings['limit_price']}")
+        """Execute Short/Long trading operation using threads (parallel)"""
+        from PySide6.QtWidgets import QApplication
 
-        # TODO: Implement actual trading logic here
-        # This is where you would:
-        # 1. Open browser for each profile
-        # 2. Navigate to trading page
-        # 3. Find token by link/address
-        # 4. Set position size based on percentage
-        # 5. Execute Market or Limit order
-        # 6. Monitor trade execution
+        self.log(f"📈 Starting {mode.upper()} trade for {len(selected_rows)} profile(s)")
+        QApplication.processEvents()
+
+        started_count = 0
+
+        for row in selected_rows:
+            email = "Unknown"
+            try:
+                email_item = self.profiles_table.item(row, 1)
+                if not email_item:
+                    continue
+
+                email = email_item.text()
+
+                # Find profile by email
+                profile_name = None
+                profiles = self.profile_manager.get_all_profiles()
+                for name in profiles:
+                    info = self.profile_manager.get_profile_info(name)
+                    if info and info.get('email') == email:
+                        profile_name = name
+                        break
+
+                if not profile_name:
+                    self.log(f"❌ Profile not found: {email}")
+                    continue
+
+                # Update status
+                self.update_profile_status(row, f"{mode.upper()}...", "#ff9800")
+                QApplication.processEvents()
+
+                # Create trade thread
+                thread = ShortLongTradeThread(
+                    self.scraper_runner,
+                    profile_name,
+                    email,
+                    mode,
+                    settings,
+                    headless=False
+                )
+
+                # Store thread reference
+                self.active_trade_threads[profile_name] = {
+                    'thread': thread,
+                    'email': email,
+                    'row': row,
+                    'mode': mode
+                }
+
+                # Connect signals
+                thread.log_signal.connect(self.log)
+                thread.driver_ready.connect(self.on_trade_driver_ready)
+                thread.finished.connect(lambda success, result, pn=profile_name: self.on_trade_finished(success, result, pn))
+
+                # Start thread (parallel execution!)
+                thread.start()
+                started_count += 1
+                self.log(f"▶️ Started {mode} trade thread for: {email}")
+
+                QApplication.processEvents()
+
+            except Exception as e:
+                import traceback
+                self.log(f"❌ Error starting trade for {email}: {str(e)}")
+                self.log(traceback.format_exc())
+                QApplication.processEvents()
+
+        self.log(f"✅ Started {started_count} {mode.upper()} trade thread(s) - running in parallel!")
 
     def on_driver_ready(self, driver, profile_info):
         """Receive Driver from thread and store it"""
@@ -1165,6 +1219,51 @@ class MainWindow(QMainWindow):
 
                 del self.active_browser_threads[profile_name]
                 break
+
+    def on_trade_finished(self, success, result, profile_name):
+        """Handle trade thread completion"""
+        thread_info = self.active_trade_threads.get(profile_name)
+        if not thread_info:
+            return
+
+        row = thread_info['row']
+        email = thread_info['email']
+        mode = thread_info['mode']
+
+        if success:
+            self.log(f"✅ {mode.upper()} trade completed for: {email}")
+            self.update_profile_status(row, f"{mode.upper()} ✓", "#4caf50")
+        else:
+            self.log(f"❌ {mode.upper()} trade failed for: {email}")
+            self.log(f"   Error: {result}")
+            self.update_profile_status(row, f"{mode.upper()} ✗", "#f44336")
+
+        # Don't cleanup thread here - it's still alive with browser open
+        # Thread will be cleaned up when user closes browser
+
+    def on_trade_driver_ready(self, driver, info):
+        """Receive Driver from trade thread and store it"""
+        profile_name = info['profile_name']
+        email = info['email']
+        mode = info.get('mode', 'trade')
+
+        # Get thread and row info
+        thread_info = self.active_trade_threads.get(profile_name)
+        if thread_info:
+            row = thread_info['row']
+        else:
+            row = None
+
+        # Store Driver in main thread (strong reference prevents garbage collection)
+        self.active_drivers[profile_name] = {
+            'driver': driver,
+            'thread': info['thread'],
+            'email': email,
+            'row': row,
+            'mode': mode
+        }
+
+        self.log(f"✅ Browser ready for {email} ({mode.upper()} mode)")
 
     def run_mexc_login_for_selected(self, selected_rows):
         """Run MEXC login automation for selected profiles - PARALLEL execution"""
