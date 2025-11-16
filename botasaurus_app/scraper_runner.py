@@ -942,63 +942,374 @@ class ShortLongTradeThread(QThread):
             self.log_signal.emit(f"⚠️ Position slider click failed: {str(e)[:100]}")
             return False
 
-    def get_selected_tab_text(self, driver):
+    def find_and_click_button_universal(self, driver, text_variants, css_class_hint=None):
         """
-        Get text of currently selected tab (aria-selected="true")
+        Universal button finder - prioritizes CSS class, falls back to text
 
-        Returns:
-            str: Text content of selected tab, or empty string if none found
-        """
-        try:
-            check_js = """
-            (function() {
-                // Find any tab with aria-selected="true"
-                var selectedTabs = document.querySelectorAll('[role="tab"][aria-selected="true"]');
-
-                if (selectedTabs.length > 0) {
-                    var tab = selectedTabs[0];
-                    var text = tab.textContent || tab.innerText || '';
-                    return text.trim();
-                }
-
-                return '';
-            })();
-            """
-
-            result = driver.run_js(check_js)
-            return result if result else ''
-
-        except Exception as e:
-            return ''
-
-    def is_tab_already_selected(self, driver, text_variants):
-        """
-        Check if any of the text variants matches currently selected tab
+        Strategy:
+        1. Try CSS class selector first (most reliable)
+        2. Fall back to text matching if CSS fails
+        3. Click ONCE and STOP
 
         Args:
             driver: Botasaurus Driver instance
-            text_variants: List of text strings (e.g., ['Лимит', 'Limit'])
+            text_variants: List of text strings (e.g., ['Шорт', 'Short'])
+            css_class_hint: Optional CSS class to search first (e.g., 'EntrustButton')
 
         Returns:
-            bool: True if tab already selected, False otherwise
+            bool: True if clicked, False otherwise
         """
         try:
             if isinstance(text_variants, str):
                 text_variants = [text_variants]
 
-            selected_text = self.get_selected_tab_text(driver)
-            if not selected_text:
+            search_texts = "', '".join(text_variants)
+            css_selector = css_class_hint if css_class_hint else ''
+
+            button_js = f"""
+            (function() {{
+                var searchTexts = ['{search_texts}'];
+                var targetButton = null;
+
+                // STRATEGY 1: Try CSS class first (most reliable)
+                if ('{css_selector}') {{
+                    var classCandidates = document.querySelectorAll('button[class*="{css_selector}"]');
+
+                    for (var i = 0; i < classCandidates.length; i++) {{
+                        var btnText = classCandidates[i].textContent || classCandidates[i].innerText || '';
+
+                        // Check if text matches any variant
+                        for (var j = 0; j < searchTexts.length; j++) {{
+                            if (btnText.includes(searchTexts[j])) {{
+                                targetButton = classCandidates[i];
+                                break;
+                            }}
+                        }}
+
+                        if (targetButton) break;
+                    }}
+                }}
+
+                // STRATEGY 2: Fall back to text matching on all buttons
+                if (!targetButton) {{
+                    var allButtons = document.querySelectorAll('button');
+
+                    for (var i = 0; i < allButtons.length; i++) {{
+                        var btnText = allButtons[i].textContent || allButtons[i].innerText || '';
+
+                        // Check if text matches any variant
+                        for (var j = 0; j < searchTexts.length; j++) {{
+                            if (btnText.includes(searchTexts[j])) {{
+                                // Check visibility
+                                var rect = allButtons[i].getBoundingClientRect();
+                                var isVisible = rect.width > 0 && rect.height > 0 &&
+                                               window.getComputedStyle(allButtons[i]).visibility !== 'hidden' &&
+                                               window.getComputedStyle(allButtons[i]).display !== 'none';
+
+                                if (isVisible) {{
+                                    targetButton = allButtons[i];
+                                    break;
+                                }}
+                            }}
+                        }}
+
+                        if (targetButton) break;
+                    }}
+                }}
+
+                // If found, scroll and click
+                if (targetButton) {{
+                    targetButton.scrollIntoView({{block: 'center', behavior: 'instant'}});
+
+                    setTimeout(function() {{
+                        var rect = targetButton.getBoundingClientRect();
+                        var centerX = rect.left + (rect.width / 2);
+                        var centerY = rect.top + (rect.height / 2);
+
+                        // Dispatch mouse events
+                        var mousedown = new MouseEvent('mousedown', {{
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: centerX,
+                            clientY: centerY
+                        }});
+
+                        var mouseup = new MouseEvent('mouseup', {{
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: centerX,
+                            clientY: centerY
+                        }});
+
+                        var click = new MouseEvent('click', {{
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: centerX,
+                            clientY: centerY
+                        }});
+
+                        targetButton.dispatchEvent(mousedown);
+                        targetButton.dispatchEvent(mouseup);
+                        targetButton.dispatchEvent(click);
+                        targetButton.click();
+                    }}, 300);
+
+                    return true;
+                }}
+
+                return false;
+            }})();
+            """
+
+            result = driver.run_js(button_js)
+
+            if result:
+                driver.sleep(1.5)  # Wait for click to process
+                self.log_signal.emit(f"✓ Clicked button: {text_variants[0]}")
+                return True
+            else:
+                self.log_signal.emit(f"⚠️ Button not found: {text_variants[0]}")
                 return False
 
-            # Check if selected tab text contains any of our variants
-            for variant in text_variants:
-                if variant.lower() in selected_text.lower():
-                    self.log_signal.emit(f"ℹ️ Tab already selected: {selected_text}")
-                    return True
-
+        except Exception as e:
+            self.log_signal.emit(f"⚠️ Button click error: {str(e)[:100]}")
             return False
 
+    def type_limit_price_human_like(self, driver, price):
+        """
+        Human-like typing into limit price input
+
+        Process:
+        1. Find input.ant-input[type="text"]
+        2. Click it
+        3. Backspace 8-12 times (clear old value)
+        4. Type new price character by character with delays (80-140ms)
+
+        Args:
+            driver: Botasaurus Driver instance
+            price: Price string to type (e.g., '45000')
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.log_signal.emit(f"💰 Typing limit price: {price}")
+
+            # STEP 1: Find and click input
+            find_input_js = """
+            (function() {
+                // Find input in limit order section
+                var inputs = document.querySelectorAll('input.ant-input[type="text"]');
+
+                // Find FIRST visible input
+                for (var i = 0; i < inputs.length; i++) {
+                    var rect = inputs[i].getBoundingClientRect();
+                    var isVisible = rect.width > 0 && rect.height > 0 &&
+                                   window.getComputedStyle(inputs[i]).visibility !== 'hidden' &&
+                                   window.getComputedStyle(inputs[i]).display !== 'none';
+
+                    if (isVisible) {
+                        // Mark this input for later operations
+                        inputs[i].setAttribute('data-price-input', 'true');
+
+                        // Click it (simulating hover + click)
+                        inputs[i].focus();
+                        inputs[i].click();
+
+                        return true;
+                    }
+                }
+
+                return false;
+            })();
+            """
+
+            result = driver.run_js(find_input_js)
+            if not result:
+                self.log_signal.emit("⚠️ Could not find limit price input")
+                return False
+
+            driver.sleep(0.3)  # Wait after click
+
+            # STEP 2: Backspace 10 times to clear old value
+            self.log_signal.emit("🔙 Clearing old price (Backspace)...")
+            for i in range(10):
+                backspace_js = """
+                (function() {
+                    var input = document.querySelector('input[data-price-input="true"]');
+                    if (!input) return false;
+
+                    // Simulate backspace key
+                    var event = new KeyboardEvent('keydown', {
+                        key: 'Backspace',
+                        code: 'Backspace',
+                        keyCode: 8,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    input.dispatchEvent(event);
+
+                    // Remove last character
+                    if (input.value.length > 0) {
+                        input.value = input.value.slice(0, -1);
+                    }
+
+                    // Trigger input event for React
+                    var inputEvent = new Event('input', {bubbles: true, cancelable: true});
+                    input.dispatchEvent(inputEvent);
+
+                    return true;
+                })();
+                """
+                driver.run_js(backspace_js)
+                driver.sleep(0.05)  # 50ms delay between backspaces
+
+            driver.sleep(0.2)  # Pause after clearing
+
+            # STEP 3: Type each character with human-like delay
+            self.log_signal.emit(f"⌨️ Typing '{price}' character by character...")
+            for char in price:
+                type_char_js = f"""
+                (function() {{
+                    var input = document.querySelector('input[data-price-input="true"]');
+                    if (!input) return false;
+
+                    // Simulate keypress
+                    var event = new KeyboardEvent('keydown', {{
+                        key: '{char}',
+                        code: 'Digit{char}' if '{char}'.isdigit() else 'Key{char.upper()}',
+                        bubbles: true,
+                        cancelable: true
+                    }});
+                    input.dispatchEvent(event);
+
+                    // Add character
+                    input.value += '{char}';
+
+                    // Trigger input event for React
+                    var inputEvent = new Event('input', {{bubbles: true, cancelable: true}});
+                    input.dispatchEvent(inputEvent);
+
+                    return true;
+                }})();
+                """
+                driver.run_js(type_char_js)
+
+                # Random delay between 80-140ms (human-like)
+                import random
+                delay = random.uniform(0.08, 0.14)
+                driver.sleep(delay)
+
+            # STEP 4: Finalize input
+            finalize_js = """
+            (function() {
+                var input = document.querySelector('input[data-price-input="true"]');
+                if (!input) return false;
+
+                // Trigger change event
+                var changeEvent = new Event('change', {bubbles: true, cancelable: true});
+                input.dispatchEvent(changeEvent);
+
+                // Blur to finalize
+                input.blur();
+
+                // Clean up marker
+                input.removeAttribute('data-price-input');
+
+                return true;
+            })();
+            """
+            driver.run_js(finalize_js)
+
+            driver.sleep(0.5)  # Wait for value to be processed
+            self.log_signal.emit(f"✓ Limit price entered: {price}")
+            return True
+
         except Exception as e:
+            self.log_signal.emit(f"⚠️ Type price error: {str(e)[:100]}")
+            return False
+
+    def select_tab(self, driver, tab_name_variants):
+        """
+        BULLETPROOF tab selection with aria-selected detection
+
+        Step A: Check if tab already selected (aria-selected="true")
+        Step B: If not, find and click tab ONCE
+
+        Args:
+            driver: Botasaurus Driver instance
+            tab_name_variants: List of tab names (e.g., ['Лимит', 'Limit'])
+
+        Returns:
+            bool: True if tab selected (already or just clicked), False otherwise
+        """
+        try:
+            if isinstance(tab_name_variants, str):
+                tab_name_variants = [tab_name_variants]
+
+            # Build search texts for JavaScript
+            search_texts = "', '".join(tab_name_variants)
+
+            tab_js = f"""
+            (function() {{
+                var searchTexts = ['{search_texts}'];
+
+                // STEP A: Check if already selected
+                var selectedTab = document.querySelector('div[role="tab"][aria-selected="true"]');
+                if (selectedTab) {{
+                    var selectedText = selectedTab.textContent || selectedTab.innerText || '';
+
+                    // Check if selected tab matches any of our search texts
+                    for (var i = 0; i < searchTexts.length; i++) {{
+                        if (selectedText.includes(searchTexts[i])) {{
+                            return 'already_selected';
+                        }}
+                    }}
+                }}
+
+                // STEP B: Not selected, find and click
+                var allTabs = document.querySelectorAll('div[role="tab"]');
+
+                for (var i = 0; i < allTabs.length; i++) {{
+                    var tabText = allTabs[i].textContent || allTabs[i].innerText || '';
+
+                    // Check if this tab matches any search text
+                    for (var j = 0; j < searchTexts.length; j++) {{
+                        if (tabText.includes(searchTexts[j])) {{
+                            // Found target tab - scroll and click
+                            allTabs[i].scrollIntoView({{block: 'center', behavior: 'instant'}});
+
+                            setTimeout(function() {{
+                                allTabs[i].click();
+                            }}, 200);
+
+                            return 'clicked';
+                        }}
+                    }}
+                }}
+
+                return 'not_found';
+            }})();
+            """
+
+            result = driver.run_js(tab_js)
+
+            if result == 'already_selected':
+                self.log_signal.emit(f"ℹ️ Tab already selected: {tab_name_variants[0]}")
+                return True
+            elif result == 'clicked':
+                driver.sleep(1.5)  # Wait for tab switch
+                self.log_signal.emit(f"✓ Clicked tab: {tab_name_variants[0]}")
+                return True
+            else:
+                self.log_signal.emit(f"⚠️ Tab not found: {tab_name_variants[0]}")
+                return False
+
+        except Exception as e:
+            self.log_signal.emit(f"⚠️ Tab selection error: {str(e)[:100]}")
             return False
 
     def find_and_click_single(self, driver, text_variants, check_tab_state=False):
@@ -1552,125 +1863,49 @@ class ShortLongTradeThread(QThread):
             driver.sleep(7)  # 7 second delay BEFORE searching for tab
 
             if self.settings['zaliv_type'] == "Limit":
-                # Select Limit tab - check if already selected first
+                # Select Limit tab using bulletproof tab selector
                 try:
-                    self.log_signal.emit("🔍 Checking Limit tab...")
+                    self.log_signal.emit("🔍 Selecting Limit tab...")
 
-                    # Use universal single-click with tab state check
-                    clicked = self.find_and_click_single(
-                        driver,
-                        ['Лимит', 'Limit'],
-                        check_tab_state=True  # Checks aria-selected before clicking
-                    )
+                    # Use new bulletproof tab selection
+                    clicked = self.select_tab(driver, ['Лимит', 'Limit'])
 
                     if clicked:
-                        self.log_signal.emit("✓ Limit tab selected")
-                        driver.sleep(7)  # 7 second delay after selecting tab
+                        driver.sleep(7)  # 7 second delay after tab selection
                         self.log_signal.emit("✓ Selected Limit order type")
                     else:
-                        self.log_signal.emit("⚠️ Could not find Limit tab")
+                        self.log_signal.emit("⚠️ Could not select Limit tab")
                 except Exception as e:
                     self.log_signal.emit(f"⚠️ Limit tab error: {e}")
 
-                # Enter limit price
-                self.log_signal.emit(f"💰 Entering limit price: {self.settings['limit_price']}")
-                driver.sleep(7)  # 7 second delay BEFORE searching for input
+                # Enter limit price with human-like typing
+                driver.sleep(7)  # 7 second delay BEFORE typing
 
-                # Target EXACT input inside InputNumberExtend_input-main wrapper
                 try:
-                    limit_price = self.settings['limit_price']
+                    # Use new human-like typing function
+                    success = self.type_limit_price_human_like(driver, self.settings['limit_price'])
 
-                    # JavaScript to find, clear, and type - targeting wrapper > input
-                    enter_price_js = f"""
-                    (function() {{
-                        // Find wrapper with specific class, then get input inside
-                        var wrapper = document.querySelector('.InputNumberExtend_input-main__StKNb');
-                        var input = null;
-
-                        if (wrapper) {{
-                            // Get input.ant-input inside wrapper
-                            input = wrapper.querySelector('input.ant-input[type="text"]');
-                        }}
-
-                        // Fallback: find by parent span class
-                        if (!input) {{
-                            var spans = document.querySelectorAll('span.ant-input-affix-wrapper.InputNumberExtend_input-main__StKNb');
-                            for (var i = 0; i < spans.length; i++) {{
-                                var candidate = spans[i].querySelector('input.ant-input[type="text"]');
-                                if (candidate) {{
-                                    input = candidate;
-                                    break;
-                                }}
-                            }}
-                        }}
-
-                        if (!input) {{
-                            return false;
-                        }}
-
-                        // Focus input
-                        input.focus();
-
-                        // Select all text (Ctrl+A equivalent)
-                        input.setSelectionRange(0, input.value.length);
-
-                        // Clear value
-                        input.value = '';
-
-                        // Trigger input event for React
-                        var inputEvent = new Event('input', {{ bubbles: true, cancelable: true }});
-                        input.dispatchEvent(inputEvent);
-
-                        // Wait then type new value
-                        setTimeout(function() {{
-                            input.value = '{limit_price}';
-
-                            // Trigger input event
-                            var inputEvent2 = new Event('input', {{ bubbles: true, cancelable: true }});
-                            input.dispatchEvent(inputEvent2);
-
-                            // Trigger change event
-                            var changeEvent = new Event('change', {{ bubbles: true, cancelable: true }});
-                            input.dispatchEvent(changeEvent);
-
-                            // Blur to finalize
-                            input.blur();
-                        }}, 150);
-
-                        return true;
-                    }})();
-                    """
-
-                    result = driver.run_js(enter_price_js)
-
-                    if result:
-                        driver.sleep(1.5)  # Wait for value to be processed
-                        self.log_signal.emit(f"✓ Limit price entered: {limit_price}")
+                    if success:
                         driver.sleep(7)  # 7 second delay after entering limit price
                     else:
-                        self.log_signal.emit(f"⚠️ Could not find limit price input field")
+                        self.log_signal.emit(f"⚠️ Failed to enter limit price")
 
                 except Exception as e:
-                    self.log_signal.emit(f"⚠️ Could not enter limit price: {e}")
+                    self.log_signal.emit(f"⚠️ Limit price error: {e}")
 
             else:  # Market order
-                # Select Market tab - check if already selected first
+                # Select Market tab using bulletproof tab selector
                 try:
-                    self.log_signal.emit("🔍 Checking Market tab...")
+                    self.log_signal.emit("🔍 Selecting Market tab...")
 
-                    # Use universal single-click with tab state check
-                    clicked = self.find_and_click_single(
-                        driver,
-                        ['Маркет', 'Market', 'Рынок'],
-                        check_tab_state=True  # Checks aria-selected before clicking
-                    )
+                    # Use new bulletproof tab selection
+                    clicked = self.select_tab(driver, ['Маркет', 'Market', 'Рынок'])
 
                     if clicked:
-                        self.log_signal.emit("✓ Market tab selected")
-                        driver.sleep(7)  # 7 second delay after selecting tab
+                        driver.sleep(7)  # 7 second delay after tab selection
                         self.log_signal.emit("✓ Selected Market order type")
                     else:
-                        self.log_signal.emit("⚠️ Could not find Market tab")
+                        self.log_signal.emit("⚠️ Could not select Market tab")
                 except Exception as e:
                     self.log_signal.emit(f"⚠️ Market tab error: {e}")
 
@@ -1725,22 +1960,22 @@ class ShortLongTradeThread(QThread):
                     self.log_signal.emit("🚀 Executing LONG trade...")
                     self.log_signal.emit("🔍 Searching for LONG execute button...")
 
-                    # SINGLE CALL - searches ALL elements, clicks ONLY FIRST match
-                    clicked = self.find_and_click_single(
+                    # Use universal button finder with CSS class hint
+                    clicked = self.find_and_click_button_universal(
                         driver,
-                        ['Открыть Лонг', 'Лонг', 'Open Long', 'Long']
-                        # No check_tab_state - buttons don't have aria-selected
+                        ['Открыть Лонг', 'Лонг', 'Open Long', 'Long', 'Купить'],
+                        css_class_hint='EntrustButton'  # Try CSS class first
                     )
 
                 else:  # short
                     self.log_signal.emit("🚀 Executing SHORT trade...")
                     self.log_signal.emit("🔍 Searching for SHORT execute button...")
 
-                    # SINGLE CALL - searches ALL elements, clicks ONLY FIRST match
-                    clicked = self.find_and_click_single(
+                    # Use universal button finder with CSS class hint
+                    clicked = self.find_and_click_button_universal(
                         driver,
-                        ['Открыть Шорт', 'Шорт', 'Open Short', 'Short']
-                        # No check_tab_state - buttons don't have aria-selected
+                        ['Открыть Шорт', 'Шорт', 'Open Short', 'Short', 'Продать'],
+                        css_class_hint='EntrustButton'  # Try CSS class first
                     )
 
                 if clicked:
@@ -1752,8 +1987,8 @@ class ShortLongTradeThread(QThread):
                     try:
                         self.log_signal.emit("🔍 Looking for confirmation button...")
 
-                        # SINGLE CALL - all text variants, all element types
-                        confirm_clicked = self.find_and_click_single(
+                        # Use universal button finder
+                        confirm_clicked = self.find_and_click_button_universal(
                             driver,
                             ['Подтвердить', 'Confirm', 'OK', 'Yes', 'Да']
                         )
