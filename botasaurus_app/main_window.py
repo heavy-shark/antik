@@ -26,9 +26,7 @@ class MainWindow(QMainWindow):
         self.scraper_runner = ScraperRunner(self.profile_manager)
         self.version = "v0.2"
         self.totp_data = {}  # Store TOTP data for each row: {row: secret}
-        self.active_threads = {}  # Store active threads (login/manual) by profile name
-        self.login_queue = []  # Queue for sequential login processing
-        self.current_login_thread = None  # Currently running login thread
+        self.active_threads = {}  # Store active threads (login) by profile name - PARALLEL execution
         self.active_drivers = {}  # Store active Driver instances to prevent garbage collection
 
         # Single global timer for all TOTP updates (performance optimization)
@@ -833,15 +831,14 @@ class MainWindow(QMainWindow):
         self.log(f"✅ Finished opening {len(selected_rows)} browser(s)!")
 
     def run_mexc_login_for_selected(self, selected_rows):
-        """Run MEXC login automation for selected profiles"""
+        """Run MEXC login automation for selected profiles - PARALLEL execution"""
         from PySide6.QtWidgets import QApplication
-        self.log("🔐 Starting MEXC Login automation...")
+        self.log("🔐 Starting MEXC Login automation (PARALLEL mode)...")
         QApplication.processEvents()
 
-        # Clear the queue
-        self.login_queue = []
+        started_count = 0
 
-        # Prepare queue with profile data
+        # Launch all threads in parallel (no queue!)
         for row in selected_rows:
             email_item = self.profiles_table.item(row, 1)
             if not email_item:
@@ -882,70 +879,46 @@ class MainWindow(QMainWindow):
                 self.update_profile_status(row, "Error: No 2FA", "#f44336")
                 continue
 
-            # Add to queue
-            self.login_queue.append({
-                'profile_name': profile_name,
-                'email': email,
-                'password': password,
-                'twofa_secret': twofa_secret,
-                'row': row
-            })
+            # Update status to "Logging in..."
+            self.update_profile_status(row, "Logging in...", "#2196f3")
+            self.log(f"▶️ Starting login thread for: {email}")
+            QApplication.processEvents()
 
-        # Start processing queue
-        if self.login_queue:
-            self.log(f"📋 Queue prepared: {len(self.login_queue)} profile(s)")
-            self.process_next_login()
+            # Create and start MEXC Auth thread (PARALLEL!)
+            thread = MexcAuthThread(
+                self.scraper_runner,
+                profile_name,
+                email,
+                password,
+                twofa_secret,
+                headless=False
+            )
+
+            # Store thread reference
+            self.active_threads[profile_name] = {
+                'thread': thread,
+                'row': row,
+                'email': email
+            }
+
+            # Connect signals
+            thread.log_signal.connect(self.log)
+            thread.captcha_signal.connect(lambda pn=profile_name: self.on_captcha_detected(pn))
+            thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_login_finished(success, result, pn))
+
+            # Also connect to thread finished signal for cleanup
+            thread.finished.connect(lambda: thread.deleteLater())
+
+            # Start thread immediately (don't wait for others!)
+            thread.start()
+            started_count += 1
+
+            QApplication.processEvents()
+
+        if started_count > 0:
+            self.log(f"🚀 Started {started_count} login thread(s) in PARALLEL - all running simultaneously!")
         else:
             self.log("❌ No valid profiles to process")
-
-    def process_next_login(self):
-        """Process next profile in login queue"""
-        if not self.login_queue:
-            self.log("✅ All profiles processed")
-            self.current_login_thread = None
-            return
-
-        # Get next profile from queue
-        profile_data = self.login_queue.pop(0)
-
-        profile_name = profile_data['profile_name']
-        email = profile_data['email']
-        password = profile_data['password']
-        twofa_secret = profile_data['twofa_secret']
-        row = profile_data['row']
-
-        # Update status to "Logging in..."
-        self.update_profile_status(row, "Logging in...", "#2196f3")
-        self.log(f"▶️ Starting login for: {email} ({len(self.login_queue)} remaining)")
-
-        # Create and start MEXC Auth thread
-        thread = MexcAuthThread(
-            self.scraper_runner,
-            profile_name,
-            email,
-            password,
-            twofa_secret,
-            headless=False
-        )
-
-        # Store thread reference
-        self.current_login_thread = thread
-        self.active_threads[profile_name] = {
-            'thread': thread,
-            'row': row,
-            'email': email
-        }
-
-        # Connect signals
-        thread.log_signal.connect(self.log)
-        thread.captcha_signal.connect(lambda pn=profile_name: self.on_captcha_detected(pn))
-        thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_login_finished(success, result, pn))
-
-        # Also connect to thread finished signal for cleanup
-        thread.finished.connect(lambda: thread.deleteLater())
-
-        # Start thread
-        thread.start()
 
     def on_captcha_detected(self, profile_name):
         """Handle captcha detection"""
@@ -991,8 +964,9 @@ class MainWindow(QMainWindow):
         if profile_name in self.active_threads:
             del self.active_threads[profile_name]
 
-        # Process next profile in queue
-        self.process_next_login()
+        # Check if all threads completed
+        if not self.active_threads:
+            self.log("✅ All login threads completed!")
 
     def update_profile_status(self, row, status_text, color):
         """Update profile status in table"""
