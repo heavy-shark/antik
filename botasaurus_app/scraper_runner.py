@@ -835,7 +835,7 @@ class ShortLongTradeThread(QThread):
 
     def click_position_slider(self, driver, position_percent):
         """
-        Click position slider dot using JavaScript to find it
+        Click position slider dot at EXACT coordinates
 
         Args:
             driver: Botasaurus Driver instance
@@ -847,76 +847,93 @@ class ShortLongTradeThread(QThread):
         try:
             self.log_signal.emit(f"🔍 Searching for {position_percent}% slider position...")
 
-            # STEP 1: Find slider dot using JavaScript
-            find_slider_js = f"""
-            // Remove old markers
-            var oldMarked = document.querySelectorAll('[data-slider-target]');
-            for (var j = 0; j < oldMarked.length; j++) {{
-                oldMarked[j].removeAttribute('data-slider-target');
-            }}
+            # Find slider dot and click at exact coordinates
+            click_slider_js = f"""
+            (function() {{
+                // Find all slider dots
+                var dots = document.querySelectorAll('.ant-slider-v2-dot, .ant-slider-dot, [class*="slider"] [class*="dot"]');
+                var targetDot = null;
 
-            // Find all slider dots
-            var dots = document.querySelectorAll('.ant-slider-v2-dot, .ant-slider-dot, [class*="slider"] [class*="dot"]');
-            var found = false;
-
-            for (var i = 0; i < dots.length; i++) {{
-                // Check style attribute for position
-                var style = dots[i].getAttribute('style') || '';
-                if (style.includes('left: {position_percent}%') || style.includes('left:{position_percent}%')) {{
-                    // Mark this dot
-                    dots[i].setAttribute('data-slider-target', 'true');
-                    // Scroll into view
-                    dots[i].scrollIntoView({{block: 'center', behavior: 'instant'}});
-                    found = true;
-                    break;
-                }}
-            }}
-
-            // If not found by exact match, try to find by proximity
-            if (!found) {{
-                var targetPercent = {position_percent};
+                // Search for exact match
                 for (var i = 0; i < dots.length; i++) {{
                     var style = dots[i].getAttribute('style') || '';
-                    var match = style.match(/left:\\s*(\\d+)%/);
-                    if (match) {{
-                        var dotPercent = parseInt(match[1]);
-                        if (Math.abs(dotPercent - targetPercent) < 3) {{  // Within 3% tolerance
-                            dots[i].setAttribute('data-slider-target', 'true');
-                            dots[i].scrollIntoView({{block: 'center', behavior: 'instant'}});
-                            found = true;
-                            break;
+                    if (style.includes('left: {position_percent}%') || style.includes('left:{position_percent}%')) {{
+                        targetDot = dots[i];
+                        break;
+                    }}
+                }}
+
+                // If not found, try proximity match
+                if (!targetDot) {{
+                    var targetPercent = {position_percent};
+                    for (var i = 0; i < dots.length; i++) {{
+                        var style = dots[i].getAttribute('style') || '';
+                        var match = style.match(/left:\\s*(\\d+)%/);
+                        if (match) {{
+                            var dotPercent = parseInt(match[1]);
+                            if (Math.abs(dotPercent - targetPercent) < 3) {{
+                                targetDot = dots[i];
+                                break;
+                            }}
                         }}
                     }}
                 }}
-            }}
 
-            return found;
+                if (!targetDot) {{
+                    return false;
+                }}
+
+                // Scroll into view
+                targetDot.scrollIntoView({{block: 'center', behavior: 'instant'}});
+
+                // Wait for scroll to complete, then click at exact position
+                setTimeout(function() {{
+                    var rect = targetDot.getBoundingClientRect();
+                    var centerX = rect.left + (rect.width / 2);
+                    var centerY = rect.top + (rect.height / 2);
+
+                    // Dispatch mouse events at exact coordinates
+                    var mousedownEvent = new MouseEvent('mousedown', {{
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: centerX,
+                        clientY: centerY
+                    }});
+
+                    var mouseupEvent = new MouseEvent('mouseup', {{
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: centerX,
+                        clientY: centerY
+                    }});
+
+                    var clickEvent = new MouseEvent('click', {{
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: centerX,
+                        clientY: centerY
+                    }});
+
+                    targetDot.dispatchEvent(mousedownEvent);
+                    targetDot.dispatchEvent(mouseupEvent);
+                    targetDot.dispatchEvent(clickEvent);
+                    targetDot.click();
+                }}, 300);
+
+                return true;
+            }})();
             """
 
-            result = driver.run_js(find_slider_js)
+            result = driver.run_js(click_slider_js)
             if not result:
-                self.log_signal.emit(f"⚠️ Could not find {position_percent}% slider dot with JavaScript")
+                self.log_signal.emit(f"⚠️ Could not find {position_percent}% slider dot")
                 return False
 
-            driver.sleep(0.5)
-
-            # STEP 2: Select marked element
-            slider_dot = driver.select('[data-slider-target="true"]', wait=2)
-            if not slider_dot:
-                self.log_signal.emit(f"⚠️ Could not select marked slider dot")
-                return False
-
-            # STEP 3: Click the dot
-            slider_dot.click()
-
-            # Clean up marker
-            cleanup_js = """
-            var marked = document.querySelector('[data-slider-target="true"]');
-            if (marked) {
-                marked.removeAttribute('data-slider-target');
-            }
-            """
-            driver.run_js(cleanup_js)
+            # Wait for click to process
+            driver.sleep(1)
 
             self.log_signal.emit(f"✓ Clicked {position_percent}% slider position")
             return True
@@ -925,11 +942,109 @@ class ShortLongTradeThread(QThread):
             self.log_signal.emit(f"⚠️ Position slider click failed: {str(e)[:100]}")
             return False
 
+    def find_and_click_by_texts(self, driver, text_variants, element_type='*'):
+        """
+        Find element by multiple text variants and click ONCE at exact coordinates
+        Stops at FIRST match to prevent double-clicking
+
+        Args:
+            driver: Botasaurus Driver instance
+            text_variants: List of text strings to search for (e.g., ['Шорт', 'Short'])
+            element_type: HTML element type (button, div, span, *)
+
+        Returns:
+            bool: True if clicked successfully, False otherwise
+        """
+        try:
+            # Convert single string to list
+            if isinstance(text_variants, str):
+                text_variants = [text_variants]
+
+            # Build JavaScript that tries all variants but clicks only FIRST match
+            text_list = "', '".join(text_variants)
+            click_js = f"""
+            (function() {{
+                var searchTexts = ['{text_list}'];
+                var elements = document.querySelectorAll('{element_type}');
+
+                // Search for FIRST matching element across ALL text variants
+                for (var i = 0; i < elements.length; i++) {{
+                    var textContent = elements[i].textContent || elements[i].innerText || '';
+
+                    // Check if this element matches ANY of the search texts
+                    for (var j = 0; j < searchTexts.length; j++) {{
+                        if (textContent.includes(searchTexts[j])) {{
+                            // Check if visible
+                            var rect = elements[i].getBoundingClientRect();
+                            var isVisible = rect.width > 0 && rect.height > 0 &&
+                                           window.getComputedStyle(elements[i]).visibility !== 'hidden' &&
+                                           window.getComputedStyle(elements[i]).display !== 'none';
+
+                            if (isVisible) {{
+                                // FOUND! Scroll and click at exact position
+                                elements[i].scrollIntoView({{block: 'center', behavior: 'instant'}});
+
+                                setTimeout(function() {{
+                                    var freshRect = elements[i].getBoundingClientRect();
+                                    var centerX = freshRect.left + (freshRect.width / 2);
+                                    var centerY = freshRect.top + (freshRect.height / 2);
+
+                                    var mousedownEvent = new MouseEvent('mousedown', {{
+                                        view: window,
+                                        bubbles: true,
+                                        cancelable: true,
+                                        clientX: centerX,
+                                        clientY: centerY
+                                    }});
+
+                                    var mouseupEvent = new MouseEvent('mouseup', {{
+                                        view: window,
+                                        bubbles: true,
+                                        cancelable: true,
+                                        clientX: centerX,
+                                        clientY: centerY
+                                    }});
+
+                                    var clickEvent = new MouseEvent('click', {{
+                                        view: window,
+                                        bubbles: true,
+                                        cancelable: true,
+                                        clientX: centerX,
+                                        clientY: centerY
+                                    }});
+
+                                    elements[i].dispatchEvent(mousedownEvent);
+                                    elements[i].dispatchEvent(mouseupEvent);
+                                    elements[i].dispatchEvent(clickEvent);
+                                    elements[i].click();
+                                }}, 300);
+
+                                return true;  // STOP AFTER FIRST MATCH
+                            }}
+                        }}
+                    }}
+                }}
+                return false;
+            }})();
+            """
+
+            result = driver.run_js(click_js)
+            if not result:
+                return False
+
+            # Wait for click to process
+            driver.sleep(1)
+
+            self.log_signal.emit(f"✓ Clicked element (searched: {', '.join(text_variants[:2])}...)")
+            return True
+
+        except Exception as e:
+            self.log_signal.emit(f"⚠️ Click failed: {str(e)[:100]}")
+            return False
+
     def find_and_click_by_text(self, driver, text, element_type='*'):
         """
-        Find element by text using JavaScript, then click using Driver.select()
-
-        This is the CORRECT way for botasaurus_driver!
+        Find element by text and click at EXACT coordinates using mouse movement
 
         Args:
             driver: Botasaurus Driver instance
@@ -940,62 +1055,81 @@ class ShortLongTradeThread(QThread):
             bool: True if clicked successfully, False otherwise
         """
         try:
-            # STEP 1: Find element using JavaScript and mark it
-            find_js = f"""
-            // Remove old markers
-            var oldMarked = document.querySelectorAll('[data-botasaurus-click-target]');
-            for (var j = 0; j < oldMarked.length; j++) {{
-                oldMarked[j].removeAttribute('data-botasaurus-click-target');
-            }}
+            # STEP 1: Find element, get coordinates, and click at exact position
+            click_js = f"""
+            (function() {{
+                // Find element containing text
+                var elements = document.querySelectorAll('{element_type}');
 
-            // Find element containing text
-            var elements = document.querySelectorAll('{element_type}');
-            var found = false;
-            for (var i = 0; i < elements.length; i++) {{
-                var textContent = elements[i].textContent || elements[i].innerText || '';
-                if (textContent.includes('{text}')) {{
-                    // Check if visible
-                    var rect = elements[i].getBoundingClientRect();
-                    var isVisible = rect.width > 0 && rect.height > 0 &&
-                                   window.getComputedStyle(elements[i]).visibility !== 'hidden' &&
-                                   window.getComputedStyle(elements[i]).display !== 'none';
+                for (var i = 0; i < elements.length; i++) {{
+                    var textContent = elements[i].textContent || elements[i].innerText || '';
+                    if (textContent.includes('{text}')) {{
+                        // Check if visible
+                        var rect = elements[i].getBoundingClientRect();
+                        var isVisible = rect.width > 0 && rect.height > 0 &&
+                                       window.getComputedStyle(elements[i]).visibility !== 'hidden' &&
+                                       window.getComputedStyle(elements[i]).display !== 'none';
 
-                    if (isVisible) {{
-                        // Mark element
-                        elements[i].setAttribute('data-botasaurus-click-target', 'true');
-                        // Scroll into view
-                        elements[i].scrollIntoView({{block: 'center', behavior: 'instant'}});
-                        found = true;
-                        break;
+                        if (isVisible) {{
+                            // Scroll into view and wait for position to stabilize
+                            elements[i].scrollIntoView({{block: 'center', behavior: 'instant'}});
+
+                            // Get FRESH bounding rect after scroll
+                            setTimeout(function() {{
+                                var freshRect = elements[i].getBoundingClientRect();
+
+                                // Calculate exact center coordinates
+                                var centerX = freshRect.left + (freshRect.width / 2);
+                                var centerY = freshRect.top + (freshRect.height / 2);
+
+                                // Create and dispatch mouse events at EXACT coordinates
+                                var mousedownEvent = new MouseEvent('mousedown', {{
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true,
+                                    clientX: centerX,
+                                    clientY: centerY
+                                }});
+
+                                var mouseupEvent = new MouseEvent('mouseup', {{
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true,
+                                    clientX: centerX,
+                                    clientY: centerY
+                                }});
+
+                                var clickEvent = new MouseEvent('click', {{
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true,
+                                    clientX: centerX,
+                                    clientY: centerY
+                                }});
+
+                                // Dispatch events in order
+                                elements[i].dispatchEvent(mousedownEvent);
+                                elements[i].dispatchEvent(mouseupEvent);
+                                elements[i].dispatchEvent(clickEvent);
+
+                                // Also trigger native click as fallback
+                                elements[i].click();
+                            }}, 300);
+
+                            return true;
+                        }}
                     }}
                 }}
-            }}
-            return found;
+                return false;
+            }})();
             """
 
-            result = driver.run_js(find_js)
+            result = driver.run_js(click_js)
             if not result:
                 return False
 
-            # Small wait for scroll
-            driver.sleep(0.5)
-
-            # STEP 2: Select marked element using Driver.select() (CSS selector)
-            element = driver.select('[data-botasaurus-click-target="true"]', wait=2)
-            if not element:
-                return False
-
-            # STEP 3: Click using botasaurus element.click()
-            element.click()
-
-            # Clean up marker
-            cleanup_js = """
-            var marked = document.querySelector('[data-botasaurus-click-target="true"]');
-            if (marked) {
-                marked.removeAttribute('data-botasaurus-click-target');
-            }
-            """
-            driver.run_js(cleanup_js)
+            # Wait for click events to process
+            driver.sleep(1)
 
             self.log_signal.emit(f"✓ Clicked element with text: {text}")
             return True
@@ -1286,18 +1420,67 @@ class ShortLongTradeThread(QThread):
                 # Enter limit price
                 self.log_signal.emit(f"💰 Entering limit price: {self.settings['limit_price']}")
                 driver.sleep(7)  # 7 second delay BEFORE searching for input
-                # Find price input - it's the first ant-input after selecting Limit
+
+                # Use JavaScript to target EXACT input field, clear it, and type new value
                 try:
-                    price_input = driver.select('.ant-input[type="text"]', wait=10)
-                    # Clear existing value
-                    price_input.clear()
-                    driver.sleep(1)
-                    # Type new price
-                    price_input.type(self.settings['limit_price'])
-                    self.log_signal.emit(f"✓ Limit price entered: {self.settings['limit_price']}")
-                    driver.sleep(7)  # 7 second delay after entering limit price
+                    limit_price = self.settings['limit_price']
+
+                    # JavaScript to find, focus, clear, and type into the EXACT input
+                    enter_price_js = f"""
+                    (function() {{
+                        // Target the EXACT input field by specific class
+                        var input = document.querySelector('.ant-input.InputNumberExtend_input-main__StKNb');
+
+                        if (!input) {{
+                            // Fallback: try just the specific class
+                            input = document.querySelector('.InputNumberExtend_input-main__StKNb');
+                        }}
+
+                        if (!input) {{
+                            return false;
+                        }}
+
+                        // Focus the input
+                        input.focus();
+
+                        // Select all existing text
+                        input.select();
+
+                        // Clear the value
+                        input.value = '';
+
+                        // Dispatch input event to trigger React/Vue handlers
+                        var inputEvent = new Event('input', {{ bubbles: true }});
+                        input.dispatchEvent(inputEvent);
+
+                        // Small delay then type new value
+                        setTimeout(function() {{
+                            input.value = '{limit_price}';
+
+                            // Trigger input event again
+                            var inputEvent2 = new Event('input', {{ bubbles: true }});
+                            input.dispatchEvent(inputEvent2);
+
+                            // Trigger change event
+                            var changeEvent = new Event('change', {{ bubbles: true }});
+                            input.dispatchEvent(changeEvent);
+                        }}, 100);
+
+                        return true;
+                    }})();
+                    """
+
+                    result = driver.run_js(enter_price_js)
+
+                    if result:
+                        driver.sleep(1)  # Wait for value to be processed
+                        self.log_signal.emit(f"✓ Limit price entered: {limit_price}")
+                        driver.sleep(7)  # 7 second delay after entering limit price
+                    else:
+                        self.log_signal.emit(f"⚠️ Could not find exact limit price input field")
+
                 except Exception as e:
-                    self.log_signal.emit(f"⚠️ Could not find price input field: {e}")
+                    self.log_signal.emit(f"⚠️ Could not enter limit price: {e}")
 
             else:  # Market order
                 # Click "Маркет" / "Market" tab
@@ -1394,63 +1577,43 @@ class ShortLongTradeThread(QThread):
                     self.log_signal.emit("🚀 Executing LONG trade...")
                     self.log_signal.emit("🔍 Searching for LONG execute button...")
 
-                    # Try Russian variants first
-                    clicked = self.find_and_click_by_text(driver, 'Открыть Лонг', 'button')
+                    # Try ALL variants in ONE call - clicks only FIRST match
+                    # First try button elements with all text variants
+                    clicked = self.find_and_click_by_texts(
+                        driver,
+                        ['Открыть Лонг', 'Лонг', 'Open Long', 'Long'],
+                        'button'
+                    )
 
+                    # If button not found, try any element type
                     if not clicked:
-                        self.log_signal.emit("🔍 Trying shorter text 'Лонг'...")
-                        clicked = self.find_and_click_by_text(driver, 'Лонг', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Открыть Лонг', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Лонг', '*')
-
-                    # Try English variants if Russian didn't work
-                    if not clicked:
-                        self.log_signal.emit("🔍 Trying English 'Open Long'...")
-                        clicked = self.find_and_click_by_text(driver, 'Open Long', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Long', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Open Long', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Long', '*')
+                        self.log_signal.emit("🔍 Trying all element types...")
+                        clicked = self.find_and_click_by_texts(
+                            driver,
+                            ['Открыть Лонг', 'Лонг', 'Open Long', 'Long'],
+                            '*'
+                        )
 
                 else:  # short
                     self.log_signal.emit("🚀 Executing SHORT trade...")
                     self.log_signal.emit("🔍 Searching for SHORT execute button...")
 
-                    # Try Russian variants first
-                    clicked = self.find_and_click_by_text(driver, 'Открыть Шорт', 'button')
+                    # Try ALL variants in ONE call - clicks only FIRST match
+                    # First try button elements with all text variants
+                    clicked = self.find_and_click_by_texts(
+                        driver,
+                        ['Открыть Шорт', 'Шорт', 'Open Short', 'Short'],
+                        'button'
+                    )
 
+                    # If button not found, try any element type
                     if not clicked:
-                        self.log_signal.emit("🔍 Trying shorter text 'Шорт'...")
-                        clicked = self.find_and_click_by_text(driver, 'Шорт', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Открыть Шорт', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Шорт', '*')
-
-                    # Try English variants if Russian didn't work
-                    if not clicked:
-                        self.log_signal.emit("🔍 Trying English 'Open Short'...")
-                        clicked = self.find_and_click_by_text(driver, 'Open Short', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Short', 'button')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Open Short', 'div')
-
-                    if not clicked:
-                        clicked = self.find_and_click_by_text(driver, 'Short', '*')
+                        self.log_signal.emit("🔍 Trying all element types...")
+                        clicked = self.find_and_click_by_texts(
+                            driver,
+                            ['Открыть Шорт', 'Шорт', 'Open Short', 'Short'],
+                            '*'
+                        )
 
                 if clicked:
                     self.log_signal.emit("✓ Execute button clicked!")
