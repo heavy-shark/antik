@@ -677,3 +677,68 @@ class MexcAuthThread(QThread):
             # Sleep briefly to allow signals to be processed
             import time
             time.sleep(0.1)
+
+
+class ManualBrowserThread(QThread):
+    """Thread for opening browser in manual mode without blocking UI"""
+    finished = Signal(bool, object)  # success, result/error
+    log_signal = Signal(str)
+
+    def __init__(self, scraper_runner, profile_name, email, headless=False):
+        super().__init__()
+        self.scraper_runner = scraper_runner
+        self.profile_name = profile_name
+        self.email = email
+        self.headless = headless
+
+    def run(self):
+        """Open browser for manual use"""
+        try:
+            self.log_signal.emit(f"🔧 Initializing browser for {self.email}...")
+
+            # Get proxy info
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+            if proxy:
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+
+            # Update last used timestamp
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver configuration
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            # Add proxy if configured
+            if proxy:
+                driver_config['proxy'] = proxy
+
+            # Create driver with profile and proxy
+            driver = Driver(**driver_config)
+
+            # Navigate to MEXC homepage
+            self.log_signal.emit(f"🌐 Opening MEXC for {self.email}...")
+            driver.get("https://www.mexc.com/")
+
+            self.log_signal.emit(f"✅ Browser opened for: {self.email}")
+            self.log_signal.emit(f"💡 Browser window left open - use it manually!")
+
+            result = {
+                "email": self.email,
+                "status": "opened"
+            }
+
+            self.finished.emit(True, result)
+
+            # Keep browser open - user will close manually
+            # driver.quit() - NOT called
+
+        except Exception as e:
+            error_msg = f"Manual browser error: {str(e)}\n{traceback.format_exc()}"
+            self.log_signal.emit(f"❌ Failed to open browser for {self.email}: {str(e)}")
+            self.finished.emit(False, error_msg)
+        finally:
+            # Ensure thread completes cleanly
+            import time
+            time.sleep(0.1)

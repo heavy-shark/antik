@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
-from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread
+from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, MexcAuthThread, ManualBrowserThread
 import json
 import pyotp
 import time
@@ -26,9 +26,10 @@ class MainWindow(QMainWindow):
         self.scraper_runner = ScraperRunner(self.profile_manager)
         self.version = "v0.2"
         self.totp_data = {}  # Store TOTP data for each row: {row: secret}
-        self.active_threads = {}  # Store active MexcAuthThread instances by profile name
+        self.active_threads = {}  # Store active threads (login/manual) by profile name
         self.login_queue = []  # Queue for sequential login processing
         self.current_login_thread = None  # Currently running login thread
+        self.manual_browser_threads = {}  # Store active ManualBrowserThread instances
 
         # Single global timer for all TOTP updates (performance optimization)
         self.global_totp_timer = QTimer()
@@ -738,7 +739,7 @@ class MainWindow(QMainWindow):
             self.log(f"❌ Unknown mode: {operation_mode}")
 
     def run_manual_browser_for_selected(self, selected_rows):
-        """Open browser manually for selected profiles"""
+        """Open browser manually for selected profiles using threads (non-blocking)"""
         from PySide6.QtWidgets import QApplication
         self.log("🖱️ Opening browser(s) in Manual mode...")
         QApplication.processEvents()
@@ -763,58 +764,57 @@ class MainWindow(QMainWindow):
                 self.log(f"❌ Profile not found for email: {email}")
                 continue
 
-            # Get profile info
-            profile_info = self.profile_manager.get_profile_info(profile_name)
-            if not profile_info:
-                self.log(f"❌ Failed to get profile info for: {email}")
-                continue
-
             # Update status to "Opening..."
             self.update_profile_status(row, "Opening...", "#2196f3")
-            self.log(f"▶️ Opening browser for: {email}")
+            self.log(f"▶️ Starting browser thread for: {email}")
 
-            try:
-                # Get proxy info
-                proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(profile_name)
-                if proxy:
-                    self.log(f"🌐 Using proxy: {proxy_display}")
+            # Create and start ManualBrowserThread (non-blocking!)
+            thread = ManualBrowserThread(
+                self.scraper_runner,
+                profile_name,
+                email,
+                headless=False
+            )
 
-                # Update last used timestamp
-                self.profile_manager.update_last_used(profile_name)
+            # Store thread reference
+            self.manual_browser_threads[profile_name] = {
+                'thread': thread,
+                'row': row,
+                'email': email
+            }
 
-                # Create driver configuration
-                from botasaurus_driver import Driver
-                driver_config = {
-                    'profile': profile_name,
-                    'headless': False
-                }
+            # Connect signals
+            thread.log_signal.connect(self.log)
+            thread.finished.connect(lambda success, result, pn=profile_name: self.on_manual_browser_finished(success, result, pn))
 
-                # Add proxy if configured
-                if proxy:
-                    driver_config['proxy'] = proxy
+            # Also connect to thread finished signal for cleanup
+            thread.finished.connect(lambda: thread.deleteLater())
 
-                # Create driver with profile and proxy
-                self.log(f"🔧 Initializing browser for {email}...")
-                driver = Driver(**driver_config)
+            # Start thread (non-blocking!)
+            thread.start()
 
-                # Navigate to MEXC homepage (or blank page)
-                driver.get("https://www.mexc.com/")
-
-                self.log(f"✅ Browser opened for: {email}")
-                self.log(f"💡 Browser window left open - use it manually!")
-                self.update_profile_status(row, "Open (Manual)", "#4caf50")
-
-                # Don't quit driver - keep browser open
-                # driver.quit() - NOT called
-
-            except Exception as e:
-                self.log(f"❌ Failed to open browser for {email}: {str(e)}")
-                self.update_profile_status(row, "Failed to open", "#f44336")
-
-            # Allow UI to update between browser launches
+            # Allow UI to update
             QApplication.processEvents()
 
-        self.log("✅ All selected browsers opened")
+        self.log(f"✅ Started {len(selected_rows)} browser thread(s) - UI remains responsive!")
+
+    def on_manual_browser_finished(self, success, result, profile_name):
+        """Handle manual browser thread completion"""
+        thread_info = self.manual_browser_threads.get(profile_name)
+        if not thread_info:
+            return
+
+        row = thread_info['row']
+        email = thread_info['email']
+
+        if success:
+            self.update_profile_status(row, "Open (Manual)", "#4caf50")
+        else:
+            self.update_profile_status(row, "Failed to open", "#f44336")
+
+        # Remove thread from active threads
+        if profile_name in self.manual_browser_threads:
+            del self.manual_browser_threads[profile_name]
 
     def run_mexc_login_for_selected(self, selected_rows):
         """Run MEXC login automation for selected profiles"""
