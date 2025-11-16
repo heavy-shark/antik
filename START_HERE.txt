@@ -1,27 +1,30 @@
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   🤖 BOTASAURUS DESKTOP APP - START HERE!                    ║
+║   🚀 HYSK MEXC FUTURES v0.2 - START HERE!                    ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-Welcome! Your app is ready with ALL features implemented:
+Welcome! Your app is ready with ALL features:
 
-  ✅ Desktop application (no localhost!)
+  ✅ MEXC Login automation (with 2FA)
+  ✅ Manual browser mode
   ✅ Profile management
   ✅ Excel mass import
+  ✅ Live TOTP codes
   ✅ Automatic proxy connection
-  ✅ URL auto-fixing
-  ✅ Results export
+  ✅ Dark blue modern UI
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🚀 LAUNCH THE APP
+  🚀 LAUNCH THE APP (CHOOSE ONE)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Just double-click:
+  ⭐ WITHOUT CONSOLE (Recommended):
+    📁 launcher.pyw
+    📁 Start Hysk Mexc Futures.vbs
+    📁 START_APP_SILENT.bat
+
+  🔧 WITH CONSOLE (For Debugging):
     📁 START_APP.bat
-
-  Or with sample data:
-    📁 CREATE_AND_IMPORT.bat
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -193,19 +196,38 @@ Welcome! Your app is ready with ALL features implemented:
   🎉 READY TO GO!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Everything is installed and ready!
+  Everything is ready!
 
   Just double-click:
-    📁 START_APP.bat
+    📁 launcher.pyw           (No console - clean start)
 
-  And start automating! 🚀
+  Or for debugging:
+    📁 START_APP.bat          (With console)
 
+  And start trading! 🚀
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📚 DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Quick Start:
+    📄 QUICK_START.txt          ← Basic usage guide
+    📄 HOW_TO_START.md          ← Launcher options
+
+  Features:
+    📄 MANUAL_MODE_GUIDE.md     ← Manual browser mode
+    📄 CHANGELOG.md             ← What's new in v0.2
+    📄 README.md                ← Complete documentation
+
+  Version: v0.2
+  Updated: 2025-11-16
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Questions? Check the docs above!
 Everything you need is documented.
 
-Enjoy your automation! 🎊
+Enjoy Hysk Mexc Futures! 🎊
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
