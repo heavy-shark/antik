@@ -42,3 +42,7 @@ Thumbs.db
 
 # Settings
 settings.json
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls

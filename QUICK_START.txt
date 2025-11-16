@@ -1,5 +1,5 @@
 ═══════════════════════════════════════════════════════════════
-   🤖 BOTASAURUS DESKTOP APP - QUICK START GUIDE 🤖
+   🚀 HYSK MEXC FUTURES v0.2 - QUICK START GUIDE 🚀
 ═══════════════════════════════════════════════════════════════
 
 📍 LOCATION: C:\Users\daniel\Desktop\hysk.pro\antik\
@@ -8,93 +8,108 @@
    ⚡ HOW TO START THE APP
 ═══════════════════════════════════════════════════════════════
 
-   >>> EASIEST WAY <<<
+   >>> NO CONSOLE (RECOMMENDED) <<<
+
+   Double-click one of these:
+   📁 launcher.pyw               (Simple, clean)
+   📁 Start Hysk Mexc Futures.vbs (Invisible launch)
+   📁 START_APP_SILENT.bat       (Batch silent)
+
+   >>> WITH CONSOLE (FOR DEBUGGING) <<<
 
    Double-click this file:
    📁 START_APP.bat
 
-   That's it! The app will open!
+   App opens with console window for seeing logs.
 
 ═══════════════════════════════════════════════════════════════
    📋 WHAT YOU'LL SEE
 ═══════════════════════════════════════════════════════════════
 
-   The app has 3 tabs:
+   The app has modern dark blue UI with:
 
-   1. 📁 PROFILES
-      - Create new browser profiles
-      - Delete old profiles
-      - View profile info
+   1. 📊 PROFILES TABLE
+      - Checkboxes to select profiles
+      - Email, Proxy IP, Live 2FA codes
+      - Status with color coding
+      - Import from Excel button
 
-   2. 🚀 RUN SCRAPER
-      - Select a profile
-      - Enter URL to scrape
-      - Choose visible/headless mode
-      - Click "Run Scraper"
+   2. 🎯 OPERATION MODES
+      - Manual (open browser)
+      - Login (auto MEXC login)
+      - Short/Long/Balance/RK (coming soon)
 
-   3. 📊 RESULTS
-      - View scraped data
-      - Export to JSON
-      - Clear results
+   3. 📝 LOGS SECTION
+      - Real-time operation logs
+      - Status messages
+      - Clear log button
 
 ═══════════════════════════════════════════════════════════════
    🎯 FIRST TIME USING?
 ═══════════════════════════════════════════════════════════════
 
-   Step 1: Create a Profile
+   Step 1: Import Profiles
+   ───────────────────────
+   - Click "📥 Import" button
+   - Select Excel file (email|password|proxy|2fa_secret)
+   - Profiles automatically created
+   - See them in table with live 2FA codes
+
+   Step 2: Try Manual Mode
    ────────────────────────
-   - Go to "Profiles" tab
-   - Click "Create New Profile"
-   - Name it: "test-profile"
-   - Click OK
+   - Select profile (checkbox)
+   - Choose "Manual" operation mode
+   - Click "Open Selected"
+   - Browser opens to MEXC
 
-   Step 2: Run a Test Scrape
-   ──────────────────────────
-   - Go to "Run Scraper" tab
-   - Select "test-profile"
-   - URL is already filled (omkar.cloud)
-   - Click "Run Scraper"
-
-   Step 3: View Results
-   ────────────────────
-   - Results tab will open automatically
-   - You'll see: URL, Title, Heading
-   - Click "Export to JSON" to save
+   Step 3: Try Login Mode
+   ───────────────────────
+   - Select profile with 2FA
+   - Choose "Login" operation mode
+   - Click "Open Selected"
+   - Watch automatic MEXC login!
 
 ═══════════════════════════════════════════════════════════════
-   💡 PROFILE TIPS
+   💡 OPERATION MODE TIPS
 ═══════════════════════════════════════════════════════════════
 
-   ✅ Profiles save everything:
-      - Cookies
-      - Sessions
-      - Login states
-      - Browser fingerprint
+   🖱️ MANUAL MODE:
+      - Opens browser without automation
+      - Full manual control
+      - Perfect for testing
+      - Use for manual trading
 
-   ✅ Stay logged in:
-      - Run in "Visible Browser" mode
-      - Log into website manually
-      - Profile remembers your login!
+   🔐 LOGIN MODE:
+      - Automatic MEXC login
+      - Auto 2FA code entry
+      - Handles captcha
+      - Sequential processing
 
-   ✅ Multiple accounts:
-      - Create profile for each account
-      - Switch between them easily
+   📊 OTHER MODES (Coming Soon):
+      - Short - Open short positions
+      - Long - Open long positions
+      - Balance - Check balances
+      - RK - Custom operations
 
 ═══════════════════════════════════════════════════════════════
-   ⚙️ BROWSER MODES
+   🎨 STATUS COLORS
 ═══════════════════════════════════════════════════════════════
 
-   🖥️ Visible Browser:
-      - You see the browser window
-      - Good for debugging
-      - Can interact manually
-      - Useful for logging in
+   🔵 Blue: In progress
+      - "Logging in..."
+      - "Opening..."
 
-   👻 Headless Mode:
-      - Browser runs in background
-      - Faster
-      - No window shown
-      - Good for production
+   🟢 Green: Success
+      - "Logged in"
+      - "Open (Manual)"
+
+   🟠 Orange: Warning
+      - "Captcha!"
+      - "Closed"
+
+   🔴 Red: Error
+      - "Login failed"
+      - "Error: No password"
 
 ═══════════════════════════════════════════════════════════════
    ❌ NO LOCALHOST REQUIRED!
@@ -125,23 +140,44 @@
 
    App won't start?
    ────────────────
-   Try running from command line:
+   - Try START_APP.bat to see errors
+   - Check Python is installed
+   - Run: python botasaurus_app/app.py
 
-   cd C:\Users\daniel\Desktop\hysk.pro\antik
-   python LAUNCHER.py
+   Console appears with launcher.pyw?
+   ──────────────────────────────────
+   - Make sure extension is .pyw not .py
+   - Or use "Start Hysk Mexc Futures.vbs"
 
-   Browser closes immediately?
-   ───────────────────────────
-   - Normal! Scraper runs and closes
-   - Check results in Results tab
-   - Use Visible mode to watch it work
+   Login fails?
+   ────────────
+   - Verify email/password
+   - Check 2FA secret is valid
+   - Test proxy with Manual mode first
+   - Check logs for detailed errors
 
 ═══════════════════════════════════════════════════════════════
    🎉 READY TO START!
 ═══════════════════════════════════════════════════════════════
 
-   >>> Double-click START_APP.bat <<<
+   >>> Double-click launcher.pyw <<<
 
-   Enjoy your standalone desktop scraper!
+   OR
+
+   >>> Double-click Start Hysk Mexc Futures.vbs <<<
+
+   Enjoy Hysk Mexc Futures v0.2!
+
+═══════════════════════════════════════════════════════════════
+   📚 MORE INFO
+═══════════════════════════════════════════════════════════════
+
+   - README.md - Complete guide
+   - HOW_TO_START.md - Launch methods
+   - MANUAL_MODE_GUIDE.md - Manual mode tutorial
+   - CHANGELOG.md - Version history
+
+   Version: v0.2
+   Updated: 2025-11-16
 
 ═══════════════════════════════════════════════════════════════
