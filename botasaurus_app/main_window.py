@@ -910,12 +910,145 @@ class MainWindow(QMainWindow):
 
     def open_settings(self):
         """Open settings dialog"""
-        self.log("⚙ Settings clicked (functionality to be implemented)")
-        QMessageBox.information(
-            self,
-            "Settings",
-            "Settings functionality will be implemented in future version"
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QGroupBox
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Settings")
+        dialog.setMinimumWidth(400)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #0a1929;
+            }
+            QGroupBox {
+                color: #90caf9;
+                border: 1px solid #1976d2;
+                border-radius: 4px;
+                margin-top: 10px;
+                padding-top: 10px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+            QLabel {
+                color: #90caf9;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(15)
+
+        # Excel Tools group
+        excel_group = QGroupBox("Excel Tools")
+        excel_layout = QVBoxLayout(excel_group)
+
+        # Generate sample button
+        generate_btn = QPushButton("📊 Generate Excel Sample")
+        generate_btn.setToolTip("Create a sample Excel file with example profiles")
+        generate_btn.clicked.connect(lambda: self.generate_sample_excel(dialog))
+        excel_layout.addWidget(generate_btn)
+
+        # Description
+        desc_label = QLabel("Generate a sample Excel file with example data\nto use as a template for importing profiles.")
+        desc_label.setStyleSheet("color: #64b5f6; font-size: 11px;")
+        excel_layout.addWidget(desc_label)
+
+        layout.addWidget(excel_group)
+
+        # Close button
+        close_layout = QHBoxLayout()
+        close_layout.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        close_layout.addWidget(close_btn)
+        layout.addLayout(close_layout)
+
+        dialog.exec()
+
+    def generate_sample_excel(self, parent_dialog=None):
+        """Generate a sample Excel file with example profiles"""
+        import os
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+
+        # Get save location
+        default_path = os.path.join(os.path.expanduser("~"), "Desktop", "profiles_sample.xlsx")
+        file_path, _ = QFileDialog.getSaveFileName(
+            parent_dialog or self,
+            "Save Sample Excel File",
+            default_path,
+            "Excel Files (*.xlsx);;All Files (*)"
         )
+
+        if not file_path:
+            return
+
+        try:
+            # Create workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Profiles"
+
+            # Headers
+            headers = ["email", "password", "proxy", "2fa_secret"]
+            header_fill = PatternFill(start_color="1976D2", end_color="1976D2", fill_type="solid")
+            header_font = Font(color="FFFFFF", bold=True)
+
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col, value=header)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center")
+
+            # Sample data
+            samples = [
+                ["user1@example.com", "password123", "http://proxy1.example.com:8080", "JBSWY3DPEHPK3PXP"],
+                ["user2@example.com", "securepass456", "socks5://proxy2.example.com:1080", "GEZDGNBVGY3TQOJQ"],
+                ["user3@example.com", "mypassword789", "http://user:pass@proxy3.example.com:3128", "MFRGGZDFMY4TQMZU"],
+                ["user4@example.com", "testpass000", "", ""],  # No proxy, no 2FA
+                ["user5@example.com", "demo12345", "123.45.67.89:8080", "KZXW6YTBOI5HS2TN"],
+            ]
+
+            for row_num, row_data in enumerate(samples, 2):
+                for col_num, value in enumerate(row_data, 1):
+                    ws.cell(row=row_num, column=col_num, value=value)
+
+            # Adjust column widths
+            ws.column_dimensions['A'].width = 25
+            ws.column_dimensions['B'].width = 18
+            ws.column_dimensions['C'].width = 40
+            ws.column_dimensions['D'].width = 20
+
+            # Save file
+            wb.save(file_path)
+
+            self.log(f"✅ Sample Excel file generated: {file_path}")
+            QMessageBox.information(
+                parent_dialog or self,
+                "Success",
+                f"Sample Excel file created:\n{file_path}\n\nYou can use this as a template for importing profiles."
+            )
+
+        except Exception as e:
+            self.log(f"❌ Error generating sample: {str(e)}")
+            QMessageBox.critical(
+                parent_dialog or self,
+                "Error",
+                f"Failed to generate sample file:\n{str(e)}"
+            )
 
     def import_profiles(self):
         """Import profiles from Excel"""
