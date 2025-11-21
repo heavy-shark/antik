@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
-from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, ManualBrowserThread, MexcLoginThread
+from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, ManualBrowserThread, MexcLoginThread, MexcShortThread, MexcLongThread
 import json
 import pyotp
 import time
@@ -1135,7 +1135,17 @@ class MainWindow(QMainWindow):
             self.run_manual_browser_for_selected(selected_rows)
         elif operation_mode == "login":
             self.run_mexc_login_for_selected(selected_rows)
-        elif operation_mode in ["short", "long", "balance", "rk"]:
+        elif operation_mode == "short":
+            # Validate settings first
+            if not self.validate_short_long_settings():
+                return
+            self.run_mexc_short_for_selected(selected_rows)
+        elif operation_mode == "long":
+            # Validate settings first
+            if not self.validate_short_long_settings():
+                return
+            self.run_mexc_long_for_selected(selected_rows)
+        elif operation_mode in ["balance", "rk"]:
             self.log(f"⚠️ Mode '{operation_mode.upper()}' not implemented yet")
             QMessageBox.information(
                 self,
@@ -1376,6 +1386,221 @@ class MainWindow(QMainWindow):
         if not self.active_threads:
             self.log("✅ All login threads completed!")
 
+    def run_mexc_short_for_selected(self, selected_rows):
+        """Run MEXC short position automation for selected profiles - PARALLEL execution"""
+        from PySide6.QtWidgets import QApplication
+        self.log("📉 Starting MEXC Short position automation (PARALLEL mode)...")
+        QApplication.processEvents()
+
+        # Get trading settings
+        settings = self.get_short_long_settings()
+        token_link = settings['token_link']
+        position_percent = settings['position_percent']
+        order_type = settings['zaliv_type']  # "Market" or "Limit"
+        limit_price = settings['limit_price']
+
+        self.log(f"🔗 Token link: {token_link}")
+        self.log(f"📊 Position: {position_percent}%")
+        self.log(f"📋 Order type: {order_type}")
+        if order_type == "Limit":
+            self.log(f"💰 Limit price: {limit_price}")
+
+        started_count = 0
+
+        # Launch all threads in parallel
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if not email_item:
+                continue
+
+            email = email_item.text()
+
+            # Find profile by email
+            profile_name = None
+            profiles = self.profile_manager.get_all_profiles()
+            for name in profiles:
+                info = self.profile_manager.get_profile_info(name)
+                if info and info.get('email') == email:
+                    profile_name = name
+                    break
+
+            if not profile_name:
+                self.log(f"❌ Profile not found for email: {email}")
+                continue
+
+            # Update status to "Opening Short..."
+            self.update_profile_status(row, "Opening Short...", "#2196f3")
+            self.log(f"▶️ Starting short thread for: {email}")
+            QApplication.processEvents()
+
+            # Create and start MEXC Short thread (PARALLEL!)
+            thread = MexcShortThread(
+                self.scraper_runner,
+                profile_name,
+                email,
+                token_link,
+                position_percent,
+                order_type=order_type,
+                limit_price=limit_price,
+                headless=False
+            )
+
+            # Store thread reference
+            self.active_trade_threads[profile_name] = {
+                'thread': thread,
+                'row': row,
+                'email': email
+            }
+
+            # Connect signals
+            thread.log_signal.connect(self.log)
+            thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_short_finished(success, result, pn))
+
+            # Start thread immediately (don't wait for others!)
+            thread.start()
+            started_count += 1
+
+            QApplication.processEvents()
+
+        if started_count > 0:
+            self.log(f"🚀 Started {started_count} short thread(s) in PARALLEL - all running simultaneously!")
+        else:
+            self.log("❌ No valid profiles to process")
+
+    def on_mexc_short_finished(self, success, result, profile_name):
+        """Handle MEXC short position completion"""
+        thread_info = self.active_trade_threads.get(profile_name)
+        if not thread_info:
+            return
+
+        row = thread_info['row']
+        email = thread_info['email']
+        thread = thread_info['thread']
+
+        if success:
+            self.log(f"✅ Short position opened for: {email}")
+            self.update_profile_status(row, "Short opened", "#4caf50")
+        else:
+            self.log(f"❌ Short position failed for: {email}")
+            self.log(f"   Error: {result}")
+            self.update_profile_status(row, "Short failed", "#f44336")
+
+        # Wait for thread to fully finish before removing
+        if thread.isRunning():
+            thread.wait(1000)  # Wait max 1 second
+
+        # Remove thread from active threads
+        if profile_name in self.active_trade_threads:
+            del self.active_trade_threads[profile_name]
+
+        # Check if all threads completed
+        if not self.active_trade_threads:
+            self.log("✅ All short position threads completed!")
+
+    def run_mexc_long_for_selected(self, selected_rows):
+        """Run MEXC long position automation for selected profiles - PARALLEL execution"""
+        from PySide6.QtWidgets import QApplication
+        self.log("📈 Starting MEXC Long position automation (PARALLEL mode)...")
+        QApplication.processEvents()
+
+        # Get trading settings
+        settings = self.get_short_long_settings()
+        token_link = settings['token_link']
+        position_percent = settings['position_percent']
+
+        self.log(f"🔗 Token link: {token_link}")
+        self.log(f"📊 Position: {position_percent}%")
+
+        started_count = 0
+
+        # Launch all threads in parallel
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if not email_item:
+                continue
+
+            email = email_item.text()
+
+            # Find profile by email
+            profile_name = None
+            profiles = self.profile_manager.get_all_profiles()
+            for name in profiles:
+                info = self.profile_manager.get_profile_info(name)
+                if info and info.get('email') == email:
+                    profile_name = name
+                    break
+
+            if not profile_name:
+                self.log(f"❌ Profile not found for email: {email}")
+                continue
+
+            # Update status to "Opening Long..."
+            self.update_profile_status(row, "Opening Long...", "#2196f3")
+            self.log(f"▶️ Starting long thread for: {email}")
+            QApplication.processEvents()
+
+            # Create and start MEXC Long thread (PARALLEL!)
+            thread = MexcLongThread(
+                self.scraper_runner,
+                profile_name,
+                email,
+                token_link,
+                position_percent,
+                headless=False
+            )
+
+            # Store thread reference
+            self.active_trade_threads[profile_name] = {
+                'thread': thread,
+                'row': row,
+                'email': email
+            }
+
+            # Connect signals
+            thread.log_signal.connect(self.log)
+            thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_long_finished(success, result, pn))
+
+            # Start thread immediately (don't wait for others!)
+            thread.start()
+            started_count += 1
+
+            QApplication.processEvents()
+
+        if started_count > 0:
+            self.log(f"🚀 Started {started_count} long thread(s) in PARALLEL - all running simultaneously!")
+        else:
+            self.log("❌ No valid profiles to process")
+
+    def on_mexc_long_finished(self, success, result, profile_name):
+        """Handle MEXC long position completion"""
+        thread_info = self.active_trade_threads.get(profile_name)
+        if not thread_info:
+            return
+
+        row = thread_info['row']
+        email = thread_info['email']
+        thread = thread_info['thread']
+
+        if success:
+            self.log(f"✅ Long position opened for: {email}")
+            self.update_profile_status(row, "Long opened", "#4caf50")
+        else:
+            self.log(f"❌ Long position failed for: {email}")
+            self.log(f"   Error: {result}")
+            self.update_profile_status(row, "Long failed", "#f44336")
+
+        # Wait for thread to fully finish before removing
+        if thread.isRunning():
+            thread.wait(1000)  # Wait max 1 second
+
+        # Remove thread from active threads
+        if profile_name in self.active_trade_threads:
+            del self.active_trade_threads[profile_name]
+
+        # Check if all threads completed
+        if not self.active_trade_threads:
+            self.log("✅ All long position threads completed!")
+
     def update_profile_status(self, row, status_text, color):
         """Update profile status in table"""
         status_item = self.profiles_table.item(row, 4)
@@ -1416,7 +1641,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle application close event - clean up threads"""
-        # Check if there are active threads
+        # Check if there are active login threads
         if self.active_threads:
             self.log("⚠️ Waiting for active login threads to finish...")
 
@@ -1432,6 +1657,26 @@ class MainWindow(QMainWindow):
                         self.log(f"⚠️ Force terminating thread: {thread_info['email']}")
                         thread.terminate()
                         thread.wait(1000)
+
+        # Check if there are active trade threads
+        if self.active_trade_threads:
+            self.log("⚠️ Waiting for active trade threads to finish...")
+
+            # Wait for all active threads to finish (max 5 seconds each)
+            for profile_name, thread_info in list(self.active_trade_threads.items()):
+                thread = thread_info['thread']
+                if thread.isRunning():
+                    self.log(f"⏳ Waiting for trade thread: {thread_info['email']}")
+                    thread.quit()  # Exit exec() loop
+                    thread.wait(5000)  # Wait max 5 seconds
+
+                    # If still running after timeout, terminate
+                    if thread.isRunning():
+                        self.log(f"⚠️ Force terminating trade thread: {thread_info['email']}")
+                        thread.terminate()
+                        thread.wait(1000)
+
+            self.active_trade_threads.clear()
 
         # Close all active browsers and stop threads
         if self.active_drivers:

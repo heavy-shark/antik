@@ -1008,3 +1008,888 @@ class MexcLoginThread(QThread):
 
         self.log_signal.emit("⏳ Waiting 25 seconds...")
         time.sleep(25)
+
+
+class MexcShortThread(QThread):
+    """
+    Thread for MEXC Short position automation using anti-detect browser with human-like behavior
+    Supports both Market and Limit orders
+    """
+    finished = Signal(bool, object)  # success, result/error
+    log_signal = Signal(str)
+
+    # Configuration constants (same as MexcLoginThread)
+    MOUSE_MOVE_DURATION_MAIN = 1.2
+    MOUSE_MOVE_DURATION_SHORT = 0.8
+    MOUSE_MOVE_DURATION_TAB = 1.0
+    MOUSE_STEP_INTERVAL_SEC = 0.02
+    CURSOR_JITTER_PX = 0.95
+    HUMAN_TYPE_TOTAL_TIME_SEC = 2.0
+
+    def __init__(self, scraper_runner, profile_name, email, token_link, position_percent, order_type="Market", limit_price="", headless=False):
+        super().__init__()
+        self.scraper_runner = scraper_runner
+        self.profile_name = profile_name
+        self.email = email
+        self.token_link = token_link
+        self.position_percent = position_percent
+        self.order_type = order_type  # "Market" or "Limit"
+        self.limit_price = limit_price  # Price for Limit orders
+        self.headless = headless
+        self.row = None
+        self.driver = None
+        self.cursor_pos = (640, 360)
+
+    def run(self):
+        """Run the short position process using anti-detect browser"""
+        try:
+            self.log_signal.emit(f"📉 Starting MEXC Short position for: {self.email}")
+            self.log_signal.emit(f"🔗 Token link: {self.token_link}")
+            self.log_signal.emit(f"📊 Position: {self.position_percent}%")
+            self.log_signal.emit(f"📋 Order type: {self.order_type}")
+            if self.order_type == "Limit":
+                self.log_signal.emit(f"💰 Limit price: {self.limit_price}")
+
+            # Get proxy for profile
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+
+            self.log_signal.emit("🔧 Launching anti-detect browser...")
+
+            # Update last used
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver config
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            if proxy:
+                driver_config['proxy'] = proxy
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+
+            # Create anti-detect browser
+            self.driver = Driver(**driver_config)
+
+            # Step 1: Navigate to token page
+            self.step_load_token_page()
+
+            # Step 2: Close popups (up to 10 times)
+            self.step_close_popups()
+
+            # Step 3: Click Market or Limit tab based on order type
+            if self.order_type == "Limit":
+                self.step_click_limit_tab()
+                # Step 4: Enter limit price
+                self.step_enter_limit_price()
+            else:
+                self.step_click_market_tab()
+
+            # Step 5: Click percentage button
+            self.step_click_percentage()
+
+            # Step 6: Click "Открыть Шорт" button
+            self.step_click_open_short()
+
+            self.log_signal.emit(f"🎉 SUCCESS - Short {self.order_type} position opened for: {self.email}")
+            self.log_signal.emit("💡 Browser window left open - close manually when done")
+
+            result = {
+                "email": self.email,
+                "status": "short_opened",
+                "position": self.position_percent,
+                "order_type": self.order_type
+            }
+            self.finished.emit(True, result)
+
+            # Keep browser open
+            self.exec()
+
+        except Exception as e:
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            self.log_signal.emit(f"❌ Short position error: {str(e)}")
+            self.finished.emit(False, error_msg)
+
+    def setup_cursor_circle(self):
+        """Setup visual cursor circle indicator"""
+        self.log_signal.emit("🎯 Setting up cursor indicator...")
+
+        # Add CSS for cursor
+        self.driver.run_js("""
+            var style = document.createElement('style');
+            style.textContent = `
+                #bot-cursor {
+                    position: fixed;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 50%;
+                    border: 2px solid red;
+                    box-sizing: border-box;
+                    pointer-events: none;
+                    z-index: 999999;
+                    transform: translate(-50%, -50%);
+                }
+            `;
+            document.head.appendChild(style);
+        """)
+
+        # Create cursor element and move function
+        self.driver.run_js("""
+            if (!document.getElementById('bot-cursor')) {
+                var d = document.createElement('div');
+                d.id = 'bot-cursor';
+                d.style.left = '50%';
+                d.style.top = '50%';
+                document.body.appendChild(d);
+            }
+            window.botCursorMove = function(x, y) {
+                var el = document.getElementById('bot-cursor');
+                if (!el) return;
+                el.style.left = x + 'px';
+                el.style.top = y + 'px';
+            };
+        """)
+
+        self.cursor_pos = (640, 360)
+
+    def human_mouse_move(self, end, duration_sec=None):
+        """Smooth cursor movement with jitter for human-like behavior"""
+        if duration_sec is None:
+            duration_sec = self.MOUSE_MOVE_DURATION_MAIN
+
+        steps = max(50, int(duration_sec / self.MOUSE_STEP_INTERVAL_SEC))
+        x1, y1 = self.cursor_pos
+        x2, y2 = end
+
+        for i in range(steps + 1):
+            t = i / steps
+            # Ease in-out
+            t_eased = 3 * t * t - 2 * t * t * t
+
+            x = x1 + (x2 - x1) * t_eased + random.uniform(-self.CURSOR_JITTER_PX, self.CURSOR_JITTER_PX)
+            y = y1 + (y2 - y1) * t_eased + random.uniform(-self.CURSOR_JITTER_PX, self.CURSOR_JITTER_PX)
+
+            # Move cursor visually
+            self.driver.run_js(f"window.botCursorMove({x}, {y})")
+
+            time.sleep(random.uniform(
+                self.MOUSE_STEP_INTERVAL_SEC * 0.7,
+                self.MOUSE_STEP_INTERVAL_SEC * 1.3
+            ))
+
+        self.cursor_pos = end
+
+    def click_element_by_selector(self, selector, duration=None):
+        """Move to element and click with human-like behavior"""
+        if duration is None:
+            duration = self.MOUSE_MOVE_DURATION_TAB
+
+        # Get element bounding box
+        box = self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }};
+        """)
+
+        if not box:
+            raise Exception(f"Element not found: {selector}")
+
+        tx = box["x"] + box["width"] / 2
+        ty = box["y"] + box["height"] / 2
+
+        # Move cursor to element
+        self.human_mouse_move((tx, ty), duration)
+
+        # Click using JavaScript
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) {{
+                el.click();
+            }}
+        """)
+
+    def click_element_by_js(self, js_selector_code, duration=None):
+        """Move to element found by custom JS and click"""
+        if duration is None:
+            duration = self.MOUSE_MOVE_DURATION_TAB
+
+        # Get element bounding box using custom JS
+        box = self.driver.run_js(f"""
+            var el = {js_selector_code};
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }};
+        """)
+
+        if not box:
+            return False
+
+        tx = box["x"] + box["width"] / 2
+        ty = box["y"] + box["height"] / 2
+
+        # Move cursor to element
+        self.human_mouse_move((tx, ty), duration)
+
+        # Click using JavaScript
+        self.driver.run_js(f"""
+            var el = {js_selector_code};
+            if (el) {{
+                el.click();
+            }}
+        """)
+
+        return True
+
+    def step_load_token_page(self):
+        """Step 1: Load the token page and wait 20 seconds"""
+        self.log_signal.emit(f"🌐 Opening token page: {self.token_link}")
+        self.driver.get(self.token_link)
+
+        # Setup cursor circle after page load
+        self.setup_cursor_circle()
+
+        self.log_signal.emit("⏳ Waiting 20 seconds for page to load...")
+        time.sleep(20)
+
+    def step_close_popups(self):
+        """Step 2: Close popups with X button (up to 10 times)"""
+        self.log_signal.emit("🔍 Checking for popups...")
+
+        # SVG path for close button
+        close_svg_path = "M512 592.440889l414.890667 414.890667 80.440889-80.440889L592.440889 512l414.890667-414.890667L926.890667 16.668444 512 431.559111 97.109333 16.668444 16.668444 97.109333 431.559111 512 16.668444 926.890667l80.440889 80.440889L512 592.440889z"
+
+        for attempt in range(10):
+            # Find close button by SVG path
+            close_exists = self.driver.run_js(f"""
+                var paths = document.querySelectorAll('path');
+                for (var i = 0; i < paths.length; i++) {{
+                    if (paths[i].getAttribute('d') === '{close_svg_path}') {{
+                        return true;
+                    }}
+                }}
+                return false;
+            """)
+
+            if not close_exists:
+                self.log_signal.emit(f"✅ No more popups found (checked {attempt + 1} times)")
+                break
+
+            self.log_signal.emit(f"🔴 Found popup #{attempt + 1}, closing...")
+
+            # Click the close button (find parent clickable element)
+            clicked = self.driver.run_js(f"""
+                var paths = document.querySelectorAll('path');
+                for (var i = 0; i < paths.length; i++) {{
+                    if (paths[i].getAttribute('d') === '{close_svg_path}') {{
+                        // Find clickable parent (svg or button)
+                        var el = paths[i].closest('svg, button, div[role="button"]');
+                        if (el) {{
+                            var rect = el.getBoundingClientRect();
+                            return {{
+                                x: rect.left,
+                                y: rect.top,
+                                width: rect.width,
+                                height: rect.height
+                            }};
+                        }}
+                    }}
+                }}
+                return null;
+            """)
+
+            if clicked:
+                tx = clicked["x"] + clicked["width"] / 2
+                ty = clicked["y"] + clicked["height"] / 2
+
+                # Move and click
+                self.human_mouse_move((tx, ty), self.MOUSE_MOVE_DURATION_SHORT)
+
+                self.driver.run_js(f"""
+                    var paths = document.querySelectorAll('path');
+                    for (var i = 0; i < paths.length; i++) {{
+                        if (paths[i].getAttribute('d') === '{close_svg_path}') {{
+                            // Try to find clickable parent (button first, then svg)
+                            var el = paths[i].closest('button, div[role="button"]');
+                            if (el && typeof el.click === 'function') {{
+                                el.click();
+                                break;
+                            }}
+                            // If no button found, try clicking the svg or its parent
+                            el = paths[i].closest('svg');
+                            if (el) {{
+                                // SVG doesn't have click(), use dispatchEvent
+                                var clickEvent = new MouseEvent('click', {{
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window
+                                }});
+                                el.dispatchEvent(clickEvent);
+                                break;
+                            }}
+                        }}
+                    }}
+                """)
+
+                self.log_signal.emit("⏳ Waiting 2 seconds after closing popup...")
+                time.sleep(2)
+            else:
+                self.log_signal.emit("⚠️ Could not find clickable close element")
+                break
+
+    def step_click_market_tab(self):
+        """Step 3: Click 'Маркет' (Market) tab"""
+        self.log_signal.emit("📊 Clicking 'Маркет' tab...")
+
+        # Find span with text "Маркет"
+        js_selector = "Array.from(document.querySelectorAll('span')).find(el => el.textContent.trim() === 'Маркет')"
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception("'Маркет' tab not found")
+
+        self.log_signal.emit("⏳ Waiting 2 seconds...")
+        time.sleep(2)
+
+    def step_click_limit_tab(self):
+        """Step 3: Click 'Лимит' (Limit) tab"""
+        self.log_signal.emit("📊 Clicking 'Лимит' tab...")
+
+        # Find span with class EntrustTabs_buttonTextOne__Jx1oT and text "Лимит"
+        js_selector = "document.querySelector('span.EntrustTabs_buttonTextOne__Jx1oT') || Array.from(document.querySelectorAll('span')).find(el => el.textContent.trim() === 'Лимит')"
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception("'Лимит' tab not found")
+
+        self.log_signal.emit("⏳ Waiting 2 seconds...")
+        time.sleep(2)
+
+    def step_enter_limit_price(self):
+        """Step 4: Enter limit price in the price input field"""
+        self.log_signal.emit(f"💰 Entering limit price: {self.limit_price}")
+
+        # Find the price input field
+        selector = 'input.ant-input[type="text"]'
+
+        # Click on the input field
+        box = self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }};
+        """)
+
+        if not box:
+            raise Exception("Price input field not found")
+
+        tx = box["x"] + box["width"] / 2
+        ty = box["y"] + box["height"] / 2
+
+        # Move cursor to input
+        self.human_mouse_move((tx, ty), self.MOUSE_MOVE_DURATION_TAB)
+
+        # Click on input
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) el.click();
+        """)
+
+        self.log_signal.emit("⏳ Waiting 1 second...")
+        time.sleep(1)
+
+        # Select all text (Ctrl+A) and delete (Backspace)
+        self.log_signal.emit("🔄 Clearing existing price (Ctrl+A + Backspace)...")
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) {{
+                el.focus();
+                el.select();
+            }}
+        """)
+        time.sleep(0.2)
+
+        # Clear the field using native setter
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) {{
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(el, '');
+                el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+            }}
+        """)
+        time.sleep(0.3)
+
+        # Type the limit price with human-like behavior
+        self.log_signal.emit(f"⌨️ Typing price: {self.limit_price}")
+        self.human_type_price(selector, self.limit_price)
+
+        self.log_signal.emit("⏳ Waiting 2 seconds...")
+        time.sleep(2)
+
+    def human_type_price(self, selector, text, total_time=None):
+        """Type text character by character with random delays - React compatible"""
+        if total_time is None:
+            total_time = self.HUMAN_TYPE_TOTAL_TIME_SEC
+        if not text:
+            return
+
+        base_delay = total_time / len(text)
+        for ch in text:
+            delay = random.uniform(base_delay * 0.5, base_delay * 1.5)
+            # Type single character using native setter for React compatibility
+            escaped_char = ch.replace("\\", "\\\\").replace("'", "\\'")
+            self.driver.run_js(f"""
+                var el = document.querySelector('{selector}');
+                if (el) {{
+                    // Use native setter to properly trigger React state update
+                    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(el, el.value + '{escaped_char}');
+
+                    // Dispatch events that React listens to
+                    el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+                }}
+            """)
+            time.sleep(delay)
+
+    def step_click_percentage(self):
+        """Step 5: Click percentage button (25%, 50%, 75%, or 100%)"""
+        percent = self.position_percent
+
+        # Map percentage to left style value
+        percent_map = {
+            "25": "25%",
+            "50": "50%",
+            "75": "75%",
+            "100": "100%"
+        }
+
+        if percent not in percent_map:
+            self.log_signal.emit(f"⚠️ Invalid percentage: {percent}%, using 25%")
+            percent = "25"
+
+        left_value = percent_map[percent]
+        self.log_signal.emit(f"📊 Clicking {percent}% position...")
+
+        # Find the percentage span by its left style and text content
+        js_selector = f"""
+            Array.from(document.querySelectorAll('span.ant-slider-v2-mark-text')).find(el =>
+                el.style.left === '{left_value}' && el.textContent.trim() === '{percent}%'
+            )
+        """
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            # Try alternative: find by text content only
+            self.log_signal.emit(f"⚠️ Primary selector failed, trying by text...")
+            js_selector_alt = f"""
+                Array.from(document.querySelectorAll('span.ant-slider-v2-mark-text')).find(el =>
+                    el.textContent.trim() === '{percent}%'
+                )
+            """
+            clicked = self.click_element_by_js(js_selector_alt, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception(f"Percentage button '{percent}%' not found")
+
+        self.log_signal.emit("⏳ Waiting 5 seconds...")
+        time.sleep(5)
+
+    def step_click_open_short(self):
+        """Step 6: Click 'Открыть Шорт' button"""
+        self.log_signal.emit("📉 Clicking 'Открыть Шорт' button...")
+
+        # Find div with exact text "Открыть Шорт"
+        js_selector = "Array.from(document.querySelectorAll('div')).find(el => el.textContent.trim() === 'Открыть Шорт')"
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception("'Открыть Шорт' button not found")
+
+        self.log_signal.emit("⏳ Waiting 5 seconds...")
+        time.sleep(5)
+
+
+class MexcLongThread(QThread):
+    """
+    Thread for MEXC Long position automation using anti-detect browser with human-like behavior
+    """
+    finished = Signal(bool, object)  # success, result/error
+    log_signal = Signal(str)
+
+    # Configuration constants (same as MexcShortThread)
+    MOUSE_MOVE_DURATION_MAIN = 1.2
+    MOUSE_MOVE_DURATION_SHORT = 0.8
+    MOUSE_MOVE_DURATION_TAB = 1.0
+    MOUSE_STEP_INTERVAL_SEC = 0.02
+    CURSOR_JITTER_PX = 0.95
+
+    def __init__(self, scraper_runner, profile_name, email, token_link, position_percent, headless=False):
+        super().__init__()
+        self.scraper_runner = scraper_runner
+        self.profile_name = profile_name
+        self.email = email
+        self.token_link = token_link
+        self.position_percent = position_percent
+        self.headless = headless
+        self.row = None
+        self.driver = None
+        self.cursor_pos = (640, 360)
+
+    def run(self):
+        """Run the long position process using anti-detect browser"""
+        try:
+            self.log_signal.emit(f"📈 Starting MEXC Long position for: {self.email}")
+            self.log_signal.emit(f"🔗 Token link: {self.token_link}")
+            self.log_signal.emit(f"📊 Position: {self.position_percent}%")
+
+            # Get proxy for profile
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+
+            self.log_signal.emit("🔧 Launching anti-detect browser...")
+
+            # Update last used
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver config
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            if proxy:
+                driver_config['proxy'] = proxy
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+
+            # Create anti-detect browser
+            self.driver = Driver(**driver_config)
+
+            # Step 1: Navigate to token page
+            self.step_load_token_page()
+
+            # Step 2: Close popups (up to 10 times)
+            self.step_close_popups()
+
+            # Step 3: Click Market tab
+            self.step_click_market_tab()
+
+            # Step 4: Click percentage button
+            self.step_click_percentage()
+
+            # Step 5: Click "Открыть Лонг" button
+            self.step_click_open_long()
+
+            self.log_signal.emit(f"🎉 SUCCESS - Long position opened for: {self.email}")
+            self.log_signal.emit("💡 Browser window left open - close manually when done")
+
+            result = {
+                "email": self.email,
+                "status": "long_opened",
+                "position": self.position_percent
+            }
+            self.finished.emit(True, result)
+
+            # Keep browser open
+            self.exec()
+
+        except Exception as e:
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            self.log_signal.emit(f"❌ Long position error: {str(e)}")
+            self.finished.emit(False, error_msg)
+
+    def setup_cursor_circle(self):
+        """Setup visual cursor circle indicator"""
+        self.log_signal.emit("🎯 Setting up cursor indicator...")
+
+        # Add CSS for cursor
+        self.driver.run_js("""
+            var style = document.createElement('style');
+            style.textContent = `
+                #bot-cursor {
+                    position: fixed;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 50%;
+                    border: 2px solid red;
+                    box-sizing: border-box;
+                    pointer-events: none;
+                    z-index: 999999;
+                    transform: translate(-50%, -50%);
+                }
+            `;
+            document.head.appendChild(style);
+        """)
+
+        # Create cursor element and move function
+        self.driver.run_js("""
+            if (!document.getElementById('bot-cursor')) {
+                var d = document.createElement('div');
+                d.id = 'bot-cursor';
+                d.style.left = '50%';
+                d.style.top = '50%';
+                document.body.appendChild(d);
+            }
+            window.botCursorMove = function(x, y) {
+                var el = document.getElementById('bot-cursor');
+                if (!el) return;
+                el.style.left = x + 'px';
+                el.style.top = y + 'px';
+            };
+        """)
+
+        self.cursor_pos = (640, 360)
+
+    def human_mouse_move(self, end, duration_sec=None):
+        """Smooth cursor movement with jitter for human-like behavior"""
+        if duration_sec is None:
+            duration_sec = self.MOUSE_MOVE_DURATION_MAIN
+
+        steps = max(50, int(duration_sec / self.MOUSE_STEP_INTERVAL_SEC))
+        x1, y1 = self.cursor_pos
+        x2, y2 = end
+
+        for i in range(steps + 1):
+            t = i / steps
+            # Ease in-out
+            t_eased = 3 * t * t - 2 * t * t * t
+
+            x = x1 + (x2 - x1) * t_eased + random.uniform(-self.CURSOR_JITTER_PX, self.CURSOR_JITTER_PX)
+            y = y1 + (y2 - y1) * t_eased + random.uniform(-self.CURSOR_JITTER_PX, self.CURSOR_JITTER_PX)
+
+            # Move cursor visually
+            self.driver.run_js(f"window.botCursorMove({x}, {y})")
+
+            time.sleep(random.uniform(
+                self.MOUSE_STEP_INTERVAL_SEC * 0.7,
+                self.MOUSE_STEP_INTERVAL_SEC * 1.3
+            ))
+
+        self.cursor_pos = end
+
+    def click_element_by_js(self, js_selector_code, duration=None):
+        """Move to element found by custom JS and click"""
+        if duration is None:
+            duration = self.MOUSE_MOVE_DURATION_TAB
+
+        # Get element bounding box using custom JS
+        box = self.driver.run_js(f"""
+            var el = {js_selector_code};
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }};
+        """)
+
+        if not box:
+            return False
+
+        tx = box["x"] + box["width"] / 2
+        ty = box["y"] + box["height"] / 2
+
+        # Move cursor to element
+        self.human_mouse_move((tx, ty), duration)
+
+        # Click using JavaScript
+        self.driver.run_js(f"""
+            var el = {js_selector_code};
+            if (el) {{
+                el.click();
+            }}
+        """)
+
+        return True
+
+    def step_load_token_page(self):
+        """Step 1: Load the token page and wait 20 seconds"""
+        self.log_signal.emit(f"🌐 Opening token page: {self.token_link}")
+        self.driver.get(self.token_link)
+
+        # Setup cursor circle after page load
+        self.setup_cursor_circle()
+
+        self.log_signal.emit("⏳ Waiting 20 seconds for page to load...")
+        time.sleep(20)
+
+    def step_close_popups(self):
+        """Step 2: Close popups with X button (up to 10 times)"""
+        self.log_signal.emit("🔍 Checking for popups...")
+
+        # SVG path for close button
+        close_svg_path = "M512 592.440889l414.890667 414.890667 80.440889-80.440889L592.440889 512l414.890667-414.890667L926.890667 16.668444 512 431.559111 97.109333 16.668444 16.668444 97.109333 431.559111 512 16.668444 926.890667l80.440889 80.440889L512 592.440889z"
+
+        for attempt in range(10):
+            # Find close button by SVG path
+            close_exists = self.driver.run_js(f"""
+                var paths = document.querySelectorAll('path');
+                for (var i = 0; i < paths.length; i++) {{
+                    if (paths[i].getAttribute('d') === '{close_svg_path}') {{
+                        return true;
+                    }}
+                }}
+                return false;
+            """)
+
+            if not close_exists:
+                self.log_signal.emit(f"✅ No more popups found (checked {attempt + 1} times)")
+                break
+
+            self.log_signal.emit(f"🔴 Found popup #{attempt + 1}, closing...")
+
+            # Click the close button (find parent clickable element)
+            clicked = self.driver.run_js(f"""
+                var paths = document.querySelectorAll('path');
+                for (var i = 0; i < paths.length; i++) {{
+                    if (paths[i].getAttribute('d') === '{close_svg_path}') {{
+                        // Find clickable parent (svg or button)
+                        var el = paths[i].closest('svg, button, div[role="button"]');
+                        if (el) {{
+                            var rect = el.getBoundingClientRect();
+                            return {{
+                                x: rect.left,
+                                y: rect.top,
+                                width: rect.width,
+                                height: rect.height
+                            }};
+                        }}
+                    }}
+                }}
+                return null;
+            """)
+
+            if clicked:
+                tx = clicked["x"] + clicked["width"] / 2
+                ty = clicked["y"] + clicked["height"] / 2
+
+                # Move and click
+                self.human_mouse_move((tx, ty), self.MOUSE_MOVE_DURATION_SHORT)
+
+                self.driver.run_js(f"""
+                    var paths = document.querySelectorAll('path');
+                    for (var i = 0; i < paths.length; i++) {{
+                        if (paths[i].getAttribute('d') === '{close_svg_path}') {{
+                            // Try to find clickable parent (button first, then svg)
+                            var el = paths[i].closest('button, div[role="button"]');
+                            if (el && typeof el.click === 'function') {{
+                                el.click();
+                                break;
+                            }}
+                            // If no button found, try clicking the svg or its parent
+                            el = paths[i].closest('svg');
+                            if (el) {{
+                                // SVG doesn't have click(), use dispatchEvent
+                                var clickEvent = new MouseEvent('click', {{
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window
+                                }});
+                                el.dispatchEvent(clickEvent);
+                                break;
+                            }}
+                        }}
+                    }}
+                """)
+
+                self.log_signal.emit("⏳ Waiting 2 seconds after closing popup...")
+                time.sleep(2)
+            else:
+                self.log_signal.emit("⚠️ Could not find clickable close element")
+                break
+
+    def step_click_market_tab(self):
+        """Step 3: Click 'Маркет' (Market) tab"""
+        self.log_signal.emit("📊 Clicking 'Маркет' tab...")
+
+        # Find span with text "Маркет"
+        js_selector = "Array.from(document.querySelectorAll('span')).find(el => el.textContent.trim() === 'Маркет')"
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception("'Маркет' tab not found")
+
+        self.log_signal.emit("⏳ Waiting 2 seconds...")
+        time.sleep(2)
+
+    def step_click_percentage(self):
+        """Step 4: Click percentage button (25%, 50%, 75%, or 100%)"""
+        percent = self.position_percent
+
+        # Map percentage to left style value
+        percent_map = {
+            "25": "25%",
+            "50": "50%",
+            "75": "75%",
+            "100": "100%"
+        }
+
+        if percent not in percent_map:
+            self.log_signal.emit(f"⚠️ Invalid percentage: {percent}%, using 25%")
+            percent = "25"
+
+        left_value = percent_map[percent]
+        self.log_signal.emit(f"📊 Clicking {percent}% position...")
+
+        # Find the percentage span by its left style and text content
+        js_selector = f"""
+            Array.from(document.querySelectorAll('span.ant-slider-v2-mark-text')).find(el =>
+                el.style.left === '{left_value}' && el.textContent.trim() === '{percent}%'
+            )
+        """
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            # Try alternative: find by text content only
+            self.log_signal.emit(f"⚠️ Primary selector failed, trying by text...")
+            js_selector_alt = f"""
+                Array.from(document.querySelectorAll('span.ant-slider-v2-mark-text')).find(el =>
+                    el.textContent.trim() === '{percent}%'
+                )
+            """
+            clicked = self.click_element_by_js(js_selector_alt, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception(f"Percentage button '{percent}%' not found")
+
+        self.log_signal.emit("⏳ Waiting 5 seconds...")
+        time.sleep(5)
+
+    def step_click_open_long(self):
+        """Step 5: Click 'Открыть Лонг' button"""
+        self.log_signal.emit("📈 Clicking 'Открыть Лонг' button...")
+
+        # Find div with exact text "Открыть Лонг"
+        js_selector = "Array.from(document.querySelectorAll('div')).find(el => el.textContent.trim() === 'Открыть Лонг')"
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception("'Открыть Лонг' button not found")
+
+        self.log_signal.emit("⏳ Waiting 5 seconds...")
+        time.sleep(5)
