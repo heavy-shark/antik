@@ -920,8 +920,6 @@ class MexcLoginThread(QThread):
 
     def step_handle_2fa(self):
         """Step 7: Handle 2FA if authenticator code is required"""
-        import time
-
         self.log_signal.emit("🔐 Checking for 2FA requirement...")
 
         # Check if 2FA title exists
@@ -943,12 +941,43 @@ class MexcLoginThread(QThread):
         # Find 2FA input field
         selector = 'input[data-id="0"]'
 
-        # Click and type 2FA code
+        # Click on input field
         self.click_element_by_selector(selector)
         time.sleep(0.3)
 
-        self.log_signal.emit("⌨️ Typing 2FA code...")
-        self.human_type(selector, code_2fa, total_time=1.5)
+        # Copy 2FA code to clipboard and paste with Ctrl+V
+        self.log_signal.emit("📋 Pasting 2FA code (Ctrl+V)...")
+
+        # Copy code to clipboard using JavaScript
+        self.driver.run_js(f"""
+            navigator.clipboard.writeText('{code_2fa}');
+        """)
+        time.sleep(0.2)
+
+        # Focus the input and select all (in case there's existing content)
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) {{
+                el.focus();
+                el.select();
+            }}
+        """)
+        time.sleep(0.1)
+
+        # Paste using Ctrl+V via JavaScript keyboard event simulation
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) {{
+                // Set value directly and trigger events for React
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(el, '{code_2fa}');
+                el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+            }}
+        """)
+
+        self.log_signal.emit(f"✅ 2FA code pasted: {code_2fa}")
+        time.sleep(0.5)
 
         # Click the switch button if exists
         has_switch = self.driver.run_js("""
