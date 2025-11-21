@@ -6,8 +6,8 @@ from PySide6.QtCore import QThread, Signal
 import sys
 import traceback
 import re
-import asyncio
 import random
+import time
 import pyotp
 
 # Only use installed botasaurus_driver package
@@ -562,11 +562,10 @@ class ManualBrowserThread(QThread):
 
 class MexcLoginThread(QThread):
     """
-    Thread for MEXC login automation using Playwright with human-like behavior
+    Thread for MEXC login automation using anti-detect browser with human-like behavior
     """
     finished = Signal(bool, object)  # success, result/error
     log_signal = Signal(str)
-    driver_ready = Signal(object, dict)  # For keeping browser open
 
     # Configuration constants (from try.py)
     MOUSE_MOVE_DURATION_MAIN = 1.2
@@ -585,147 +584,132 @@ class MexcLoginThread(QThread):
         self.twofa_secret = twofa_secret
         self.headless = headless
         self.row = None
-        self.page = None
-        self.browser = None
+        self.driver = None
         self.cursor_pos = (640, 360)
 
     def run(self):
-        """Run the async login process"""
+        """Run the login process using anti-detect browser"""
+        import time
+
         try:
-            # Run async code in event loop
-            asyncio.run(self.async_login())
+            self.log_signal.emit("🔐 Starting MEXC login with human-like behavior...")
+
+            # Get proxy for profile
+            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
+
+            self.log_signal.emit("🔧 Launching anti-detect browser...")
+
+            # Update last used
+            self.scraper_runner.profile_manager.update_last_used(self.profile_name)
+
+            # Create driver config (same as ManualBrowserThread)
+            driver_config = {
+                'profile': self.profile_name,
+                'headless': self.headless
+            }
+
+            if proxy:
+                driver_config['proxy'] = proxy
+                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
+
+            # Create anti-detect browser
+            self.driver = Driver(**driver_config)
+
+            # Step 1: Navigate to login page
+            self.log_signal.emit("🌐 Opening MEXC login page...")
+            login_url = "https://www.mexc.com/ru-RU/login?previous=%2Fru-RU%2F"
+            self.driver.get(login_url)
+
+            # Setup cursor circle after page load
+            self.setup_cursor_circle()
+
+            self.log_signal.emit("⏳ Waiting 10 seconds for page to load...")
+            time.sleep(10)
+
+            # Step 2: Enter email
+            self.step_enter_email()
+
+            # Step 3: Check and click switch if needed
+            self.step_check_switch()
+
+            # Step 4: Click "Далее" button
+            self.step_click_next()
+
+            # Step 5: Enter password
+            self.step_enter_password()
+
+            # Step 6: Click "Войти" button
+            self.step_click_login()
+
+            # Step 7: Handle 2FA if exists
+            self.step_handle_2fa()
+
+            # Step 8: Click "ОК" button
+            self.step_click_ok()
+
+            self.log_signal.emit("🎉 Login completed successfully!")
+            self.log_signal.emit("💡 Browser window left open - close manually when done")
+
+            result = {
+                "email": self.email,
+                "status": "logged_in"
+            }
+            self.finished.emit(True, result)
+
+            # Keep browser open
+            self.exec()
+
         except Exception as e:
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             self.log_signal.emit(f"❌ Login error: {str(e)}")
             self.finished.emit(False, error_msg)
 
-    async def async_login(self):
-        """Main async login process"""
-        from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-
-        self.log_signal.emit("🔐 Starting MEXC login with human-like behavior...")
-
-        async with async_playwright() as p:
-            # Get proxy for profile
-            proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
-
-            # Get profile path for persistent context
-            profile_path = self.scraper_runner.profile_manager.get_profile_path(self.profile_name)
-
-            self.log_signal.emit("🔧 Launching browser...")
-
-            # Browser launch options
-            launch_args = ["--start-maximized"]
-
-            # Launch browser with persistent context (like manual mode)
-            context = await p.chromium.launch_persistent_context(
-                profile_path,
-                headless=self.headless,
-                args=launch_args,
-                proxy={"server": proxy} if proxy else None,
-                viewport={"width": 1280, "height": 720}
-            )
-
-            context.set_default_timeout(15000)
-            self.page = await context.new_page()
-
-            if proxy:
-                self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
-
-            try:
-                # Step 1: Navigate to login page FIRST
-                self.log_signal.emit("🌐 Opening MEXC login page...")
-                login_url = "https://www.mexc.com/ru-RU/login?previous=%2Fru-RU%2F"
-                try:
-                    await self.page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-                except PlaywrightTimeoutError:
-                    self.log_signal.emit("⚠️ Page load timeout, continuing...")
-
-                # Setup cursor circle AFTER navigation (JS context is fresh after goto)
-                self.cursor_pos = await self.setup_cursor_circle()
-
-                self.log_signal.emit("⏳ Waiting 10 seconds for page to load...")
-                await self.page.wait_for_timeout(10000)
-
-                # Step 2: Enter email
-                await self.step_enter_email()
-
-                # Step 3: Check and click switch if needed
-                await self.step_check_switch()
-
-                # Step 4: Click "Далее" button
-                await self.step_click_next()
-
-                # Step 5: Enter password
-                await self.step_enter_password()
-
-                # Step 6: Click "Войти" button
-                await self.step_click_login()
-
-                # Step 7: Handle 2FA if exists
-                await self.step_handle_2fa()
-
-                # Step 8: Click "ОК" button
-                await self.step_click_ok()
-
-                self.log_signal.emit("🎉 Login completed successfully!")
-                self.log_signal.emit("💡 Browser window left open - close manually when done")
-
-                result = {
-                    "email": self.email,
-                    "status": "logged_in"
-                }
-                self.finished.emit(True, result)
-
-                # Keep browser open
-                await asyncio.sleep(3600)  # Keep alive for 1 hour
-
-            except Exception as e:
-                raise e
-            finally:
-                pass  # Don't close browser
-
-    async def setup_cursor_circle(self):
+    def setup_cursor_circle(self):
         """Setup visual cursor circle indicator"""
         self.log_signal.emit("🎯 Setting up cursor indicator...")
 
-        await self.page.add_style_tag(content="""
-            #bot-cursor {
-                position: fixed;
-                width: 26px;
-                height: 26px;
-                border-radius: 50%;
-                border: 2px solid red;
-                box-sizing: border-box;
-                pointer-events: none;
-                z-index: 999999;
-                transform: translate(-50%, -50%);
-            }
+        # Add CSS for cursor
+        self.driver.run_js("""
+            var style = document.createElement('style');
+            style.textContent = `
+                #bot-cursor {
+                    position: fixed;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 50%;
+                    border: 2px solid red;
+                    box-sizing: border-box;
+                    pointer-events: none;
+                    z-index: 999999;
+                    transform: translate(-50%, -50%);
+                }
+            `;
+            document.head.appendChild(style);
         """)
 
-        await self.page.evaluate("""
+        # Create cursor element and move function
+        self.driver.run_js("""
             if (!document.getElementById('bot-cursor')) {
-                const d = document.createElement('div');
+                var d = document.createElement('div');
                 d.id = 'bot-cursor';
                 d.style.left = '50%';
                 d.style.top = '50%';
                 document.body.appendChild(d);
             }
-            window.botCursorMove = (x, y) => {
-                const el = document.getElementById('bot-cursor');
+            window.botCursorMove = function(x, y) {
+                var el = document.getElementById('bot-cursor');
                 if (!el) return;
                 el.style.left = x + 'px';
                 el.style.top = y + 'px';
             };
         """)
 
-        cx, cy = 640, 360
-        await self.page.evaluate("(pos) => window.botCursorMove(pos.x, pos.y)", {"x": cx, "y": cy})
-        await self.page.mouse.move(cx, cy)
-        return (cx, cy)
+        self.cursor_pos = (640, 360)
 
-    async def human_mouse_move(self, end, duration_sec=None):
+    def human_mouse_move(self, end, duration_sec=None):
         """Smooth cursor movement with jitter for human-like behavior"""
+        import time
+
         if duration_sec is None:
             duration_sec = self.MOUSE_MOVE_DURATION_MAIN
 
@@ -741,20 +725,20 @@ class MexcLoginThread(QThread):
             x = x1 + (x2 - x1) * t_eased + random.uniform(-self.CURSOR_JITTER_PX, self.CURSOR_JITTER_PX)
             y = y1 + (y2 - y1) * t_eased + random.uniform(-self.CURSOR_JITTER_PX, self.CURSOR_JITTER_PX)
 
-            await self.page.mouse.move(x, y)
-            await self.page.evaluate(
-                "(pos) => window.botCursorMove(pos.x, pos.y)",
-                {"x": x, "y": y}
-            )
-            await asyncio.sleep(random.uniform(
+            # Move cursor visually
+            self.driver.run_js(f"window.botCursorMove({x}, {y})")
+
+            time.sleep(random.uniform(
                 self.MOUSE_STEP_INTERVAL_SEC * 0.7,
                 self.MOUSE_STEP_INTERVAL_SEC * 1.3
             ))
 
         self.cursor_pos = end
 
-    async def human_type(self, locator, text, total_time=None):
+    def human_type(self, selector, text, total_time=None):
         """Type text character by character with random delays"""
+        import time
+
         if total_time is None:
             total_time = self.HUMAN_TYPE_TOTAL_TIME_SEC
         if not text:
@@ -763,158 +747,186 @@ class MexcLoginThread(QThread):
         base_delay = total_time / len(text)
         for ch in text:
             delay = random.uniform(base_delay * 0.5, base_delay * 1.5)
-            await locator.type(ch)
-            await asyncio.sleep(delay)
+            # Type single character using JavaScript
+            escaped_char = ch.replace("\\", "\\\\").replace("'", "\\'")
+            self.driver.run_js(f"""
+                var el = document.querySelector('{selector}');
+                if (el) {{
+                    el.value += '{escaped_char}';
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                }}
+            """)
+            time.sleep(delay)
 
-    async def click_element(self, locator, duration=None):
+    def click_element_by_selector(self, selector, duration=None):
         """Move to element and click with human-like behavior"""
+        import time
+
         if duration is None:
             duration = self.MOUSE_MOVE_DURATION_TAB
 
-        box = await locator.bounding_box()
+        # Get element bounding box
+        box = self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }};
+        """)
+
         if not box:
-            raise Exception("Element bounding box not found")
+            raise Exception(f"Element not found: {selector}")
 
         tx = box["x"] + box["width"] / 2
         ty = box["y"] + box["height"] / 2
 
-        await self.human_mouse_move((tx, ty), duration)
-        await self.page.mouse.click(tx, ty)
+        # Move cursor to element
+        self.human_mouse_move((tx, ty), duration)
 
-    async def step_enter_email(self):
+        # Click using JavaScript
+        self.driver.run_js(f"""
+            var el = document.querySelector('{selector}');
+            if (el) {{
+                el.click();
+            }}
+        """)
+
+    def step_enter_email(self):
         """Step 2: Enter email in the input field"""
+        import time
+
         self.log_signal.emit("📧 Finding email input field...")
 
-        email_input = self.page.locator("#emailInputwwwmexccom")
+        selector = "#emailInputwwwmexccom"
 
-        try:
-            await email_input.wait_for(timeout=10000)
-        except:
+        # Wait for element
+        self.driver.sleep(2)
+
+        # Check if element exists
+        exists = self.driver.run_js(f"return !!document.querySelector('{selector}')")
+        if not exists:
             raise Exception("Email input field not found")
 
         # Click on input
-        await self.click_element(email_input)
+        self.click_element_by_selector(selector)
 
         # Check if input has value and clear it
-        current_value = await email_input.input_value()
+        current_value = self.driver.run_js(f"return document.querySelector('{selector}').value")
         if current_value:
             self.log_signal.emit("🔄 Clearing existing email value...")
-            await self.page.keyboard.press("Control+A")
-            await self.page.keyboard.press("Backspace")
-            await asyncio.sleep(0.3)
+            self.driver.run_js(f"""
+                var el = document.querySelector('{selector}');
+                el.select();
+            """)
+            time.sleep(0.2)
+            self.driver.run_js(f"document.querySelector('{selector}').value = ''")
+            time.sleep(0.3)
 
         # Type email with human-like behavior
         self.log_signal.emit(f"⌨️ Typing email: {self.email}")
-        await self.human_type(email_input, self.email)
+        self.human_type(selector, self.email)
 
         self.log_signal.emit("⏳ Waiting 4 seconds...")
-        await self.page.wait_for_timeout(4000)
+        time.sleep(4)
 
-    async def step_check_switch(self):
+    def step_check_switch(self):
         """Step 3: Check switch state and click if needed"""
+        import time
+
         self.log_signal.emit("🔘 Checking switch state...")
 
-        # Check if switch is already checked (aria-checked="true")
-        switch_checked = self.page.locator('button[role="switch"][aria-checked="true"].ant-switch-small')
-        switch_unchecked = self.page.locator('button[role="switch"][aria-checked="false"].ant-switch-small')
+        # Check if switch is already checked
+        is_checked = self.driver.run_js("""
+            var sw = document.querySelector('button[role="switch"].ant-switch-small');
+            return sw ? sw.getAttribute('aria-checked') === 'true' : null;
+        """)
 
-        try:
-            checked_count = await switch_checked.count()
-            if checked_count > 0:
-                self.log_signal.emit("✅ Switch already enabled, skipping...")
-            else:
-                unchecked_count = await switch_unchecked.count()
-                if unchecked_count > 0:
-                    self.log_signal.emit("🔘 Clicking switch to enable...")
-                    await self.click_element(switch_unchecked.first, self.MOUSE_MOVE_DURATION_SHORT)
-                else:
-                    self.log_signal.emit("⚠️ Switch not found, continuing...")
-        except:
-            self.log_signal.emit("⚠️ Error checking switch, continuing...")
+        if is_checked is None:
+            self.log_signal.emit("⚠️ Switch not found, continuing...")
+        elif is_checked:
+            self.log_signal.emit("✅ Switch already enabled, skipping...")
+        else:
+            self.log_signal.emit("🔘 Clicking switch to enable...")
+            self.click_element_by_selector('button[role="switch"].ant-switch-small', self.MOUSE_MOVE_DURATION_SHORT)
 
         self.log_signal.emit("⏳ Waiting 3 seconds...")
-        await self.page.wait_for_timeout(3000)
+        time.sleep(3)
 
-    async def step_click_next(self):
+    def step_click_next(self):
         """Step 4: Click 'Далее' button and wait 30 seconds with countdown"""
+        import time
+
         self.log_signal.emit("➡️ Finding 'Далее' button...")
 
-        next_button = self.page.locator('button[type="submit"].ant-btn-v2-primary span:has-text("Далее")').first
-
-        try:
-            await next_button.wait_for(timeout=10000)
-        except:
-            # Try alternative selector
-            next_button = self.page.locator('button[type="submit"].ant-btn-v2-primary').first
-            await next_button.wait_for(timeout=5000)
+        selector = 'button[type="submit"].ant-btn-v2-primary'
 
         self.log_signal.emit("🖱️ Clicking 'Далее'...")
-        # Click the parent button
-        parent_button = self.page.locator('button[type="submit"].ant-btn-v2-primary').first
-        await self.click_element(parent_button)
+        self.click_element_by_selector(selector)
 
         # Wait 30 seconds with countdown
         self.log_signal.emit("⏳ Waiting 30 seconds (for captcha if needed)...")
         for i in range(6):
             remaining = 30 - (i * 5)
             self.log_signal.emit(f"   ⏳ {remaining} seconds left...")
-            await self.page.wait_for_timeout(5000)
+            time.sleep(5)
 
-    async def step_enter_password(self):
+    def step_enter_password(self):
         """Step 5: Enter password"""
+        import time
+
         self.log_signal.emit("🔑 Finding password input field...")
 
-        password_input = self.page.locator("#passwordInput")
+        selector = "#passwordInput"
 
-        try:
-            await password_input.wait_for(timeout=10000)
-        except:
+        # Wait for element
+        self.driver.sleep(2)
+
+        # Check if element exists
+        exists = self.driver.run_js(f"return !!document.querySelector('{selector}')")
+        if not exists:
             raise Exception("Password input field not found")
 
         # Click on input
-        await self.click_element(password_input)
-        await asyncio.sleep(0.3)
+        self.click_element_by_selector(selector)
+        time.sleep(0.3)
 
         # Type password with human-like behavior
         self.log_signal.emit("⌨️ Typing password...")
-        await self.human_type(password_input, self.password)
+        self.human_type(selector, self.password)
 
         self.log_signal.emit("⏳ Waiting 5 seconds...")
-        await self.page.wait_for_timeout(5000)
+        time.sleep(5)
 
-    async def step_click_login(self):
+    def step_click_login(self):
         """Step 6: Click 'Войти' button"""
+        import time
+
         self.log_signal.emit("🔓 Finding 'Войти' button...")
 
-        login_button = self.page.locator('button[type="submit"].ant-btn-v2-primary span:has-text("Войти")').first
-
-        try:
-            await login_button.wait_for(timeout=10000)
-        except:
-            # Try alternative selector
-            login_button = self.page.locator('button[type="submit"].ant-btn-v2-primary').first
-            await login_button.wait_for(timeout=5000)
+        selector = 'button[type="submit"].ant-btn-v2-primary'
 
         self.log_signal.emit("🖱️ Clicking 'Войти'...")
-        parent_button = self.page.locator('button[type="submit"].ant-btn-v2-primary').first
-        await self.click_element(parent_button)
+        self.click_element_by_selector(selector)
 
         self.log_signal.emit("⏳ Waiting 10 seconds...")
-        await self.page.wait_for_timeout(10000)
+        time.sleep(10)
 
-    async def step_handle_2fa(self):
+    def step_handle_2fa(self):
         """Step 7: Handle 2FA if authenticator code is required"""
+        import time
+
         self.log_signal.emit("🔐 Checking for 2FA requirement...")
 
         # Check if 2FA title exists
-        twofa_title = self.page.locator('div._captchaTitle_uq1a0_91:has-text("Код аутентификатора")')
+        has_2fa = self.driver.run_js("""
+            return !!document.querySelector('div._captchaTitle_uq1a0_91');
+        """)
 
-        try:
-            title_count = await twofa_title.count()
-            if title_count == 0:
-                self.log_signal.emit("ℹ️ No 2FA required, skipping...")
-                return
-        except:
+        if not has_2fa:
             self.log_signal.emit("ℹ️ No 2FA required, skipping...")
             return
 
@@ -925,47 +937,42 @@ class MexcLoginThread(QThread):
         code_2fa = totp.now()
         self.log_signal.emit(f"✅ 2FA code generated: {code_2fa}")
 
-        # Find 2FA input field (input with data-id="0")
-        twofa_input = self.page.locator('input[data-id="0"][type="tel"]').first
-
-        try:
-            await twofa_input.wait_for(timeout=5000)
-        except:
-            raise Exception("2FA input field not found")
+        # Find 2FA input field
+        selector = 'input[data-id="0"]'
 
         # Click and type 2FA code
-        await self.click_element(twofa_input)
-        await asyncio.sleep(0.3)
+        self.click_element_by_selector(selector)
+        time.sleep(0.3)
 
         self.log_signal.emit("⌨️ Typing 2FA code...")
-        await self.human_type(twofa_input, code_2fa, total_time=1.5)
+        self.human_type(selector, code_2fa, total_time=1.5)
 
         # Click the switch button if exists
-        twofa_switch = self.page.locator('button[role="switch"].ant-switch._switchBtn_uq1a0_28')
-        try:
-            switch_count = await twofa_switch.count()
-            if switch_count > 0:
-                self.log_signal.emit("🔘 Clicking 2FA switch...")
-                await self.click_element(twofa_switch.first, self.MOUSE_MOVE_DURATION_SHORT)
-        except:
-            self.log_signal.emit("⚠️ 2FA switch not found, continuing...")
+        has_switch = self.driver.run_js("""
+            return !!document.querySelector('button[role="switch"]._switchBtn_uq1a0_28');
+        """)
+        if has_switch:
+            self.log_signal.emit("🔘 Clicking 2FA switch...")
+            self.click_element_by_selector('button[role="switch"]._switchBtn_uq1a0_28', self.MOUSE_MOVE_DURATION_SHORT)
 
         self.log_signal.emit("⏳ Waiting 10 seconds...")
-        await self.page.wait_for_timeout(10000)
+        time.sleep(10)
 
-    async def step_click_ok(self):
+    def step_click_ok(self):
         """Step 8: Click 'ОК' button"""
+        import time
+
         self.log_signal.emit("✅ Finding 'ОК' button...")
 
-        ok_button = self.page.locator('button[type="button"].ant-btn-v2-primary span:has-text("ОК")').first
+        selector = 'button[type="button"].ant-btn-v2-primary'
 
-        try:
-            await ok_button.wait_for(timeout=10000)
+        # Check if button exists
+        exists = self.driver.run_js(f"return !!document.querySelector('{selector}')")
+        if exists:
             self.log_signal.emit("🖱️ Clicking 'ОК'...")
-            parent_button = self.page.locator('button[type="button"].ant-btn-v2-primary').first
-            await self.click_element(parent_button)
-        except:
+            self.click_element_by_selector(selector)
+        else:
             self.log_signal.emit("ℹ️ 'ОК' button not found, may not be needed...")
 
         self.log_signal.emit("⏳ Waiting 25 seconds...")
-        await self.page.wait_for_timeout(25000)
+        time.sleep(25)
