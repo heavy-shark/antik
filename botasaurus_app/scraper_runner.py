@@ -736,9 +736,7 @@ class MexcLoginThread(QThread):
         self.cursor_pos = end
 
     def human_type(self, selector, text, total_time=None):
-        """Type text character by character with random delays"""
-        import time
-
+        """Type text character by character with random delays - React compatible"""
         if total_time is None:
             total_time = self.HUMAN_TYPE_TOTAL_TIME_SEC
         if not text:
@@ -747,13 +745,18 @@ class MexcLoginThread(QThread):
         base_delay = total_time / len(text)
         for ch in text:
             delay = random.uniform(base_delay * 0.5, base_delay * 1.5)
-            # Type single character using JavaScript
+            # Type single character using native setter for React compatibility
             escaped_char = ch.replace("\\", "\\\\").replace("'", "\\'")
             self.driver.run_js(f"""
                 var el = document.querySelector('{selector}');
                 if (el) {{
-                    el.value += '{escaped_char}';
-                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    // Use native setter to properly trigger React state update
+                    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(el, el.value + '{escaped_char}');
+
+                    // Dispatch events that React listens to
+                    el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
                 }}
             """)
             time.sleep(delay)
