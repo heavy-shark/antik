@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from profile_manager import ProfileManager
-from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, ManualBrowserThread
+from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, ManualBrowserThread, MexcLoginThread
 import json
 import pyotp
 import time
@@ -1000,7 +1000,9 @@ class MainWindow(QMainWindow):
         # Handle different operation modes
         if operation_mode == "manual":
             self.run_manual_browser_for_selected(selected_rows)
-        elif operation_mode in ["login", "short", "long", "balance", "rk"]:
+        elif operation_mode == "login":
+            self.run_mexc_login_for_selected(selected_rows)
+        elif operation_mode in ["short", "long", "balance", "rk"]:
             self.log(f"⚠️ Mode '{operation_mode.upper()}' not implemented yet")
             QMessageBox.information(
                 self,
@@ -1126,6 +1128,120 @@ class MainWindow(QMainWindow):
 
                 del self.active_browser_threads[profile_name]
                 break
+
+    def run_mexc_login_for_selected(self, selected_rows):
+        """Run MEXC login automation for selected profiles - PARALLEL execution"""
+        from PySide6.QtWidgets import QApplication
+        self.log("🔐 Starting MEXC Login automation (PARALLEL mode)...")
+        QApplication.processEvents()
+
+        started_count = 0
+
+        # Launch all threads in parallel
+        for row in selected_rows:
+            email_item = self.profiles_table.item(row, 1)
+            if not email_item:
+                continue
+
+            email = email_item.text()
+
+            # Find profile by email
+            profile_name = None
+            profiles = self.profile_manager.get_all_profiles()
+            for name in profiles:
+                info = self.profile_manager.get_profile_info(name)
+                if info and info.get('email') == email:
+                    profile_name = name
+                    break
+
+            if not profile_name:
+                self.log(f"❌ Profile not found for email: {email}")
+                continue
+
+            # Get profile info
+            profile_info = self.profile_manager.get_profile_info(profile_name)
+            if not profile_info:
+                self.log(f"❌ Failed to get profile info for: {email}")
+                continue
+
+            # Validate required fields
+            password = profile_info.get('password', '')
+            twofa_secret = profile_info.get('twofa_secret', '')
+
+            if not password:
+                self.log(f"❌ Missing password for: {email}")
+                self.update_profile_status(row, "Error: No password", "#f44336")
+                continue
+
+            if not twofa_secret:
+                self.log(f"⚠️ No 2FA secret for: {email} (will skip 2FA step)")
+
+            # Update status to "Logging in..."
+            self.update_profile_status(row, "Logging in...", "#2196f3")
+            self.log(f"▶️ Starting login thread for: {email}")
+            QApplication.processEvents()
+
+            # Create and start MEXC Login thread (PARALLEL!)
+            thread = MexcLoginThread(
+                self.scraper_runner,
+                profile_name,
+                email,
+                password,
+                twofa_secret,
+                headless=False
+            )
+
+            # Store thread reference
+            self.active_threads[profile_name] = {
+                'thread': thread,
+                'row': row,
+                'email': email
+            }
+
+            # Connect signals
+            thread.log_signal.connect(self.log)
+            thread.finished.connect(lambda success, result, pn=profile_name: self.on_mexc_login_finished(success, result, pn))
+
+            # Start thread immediately (don't wait for others!)
+            thread.start()
+            started_count += 1
+
+            QApplication.processEvents()
+
+        if started_count > 0:
+            self.log(f"🚀 Started {started_count} login thread(s) in PARALLEL - all running simultaneously!")
+        else:
+            self.log("❌ No valid profiles to process")
+
+    def on_mexc_login_finished(self, success, result, profile_name):
+        """Handle MEXC login completion"""
+        thread_info = self.active_threads.get(profile_name)
+        if not thread_info:
+            return
+
+        row = thread_info['row']
+        email = thread_info['email']
+        thread = thread_info['thread']
+
+        if success:
+            self.log(f"✅ Login successful for: {email}")
+            self.update_profile_status(row, "Logged in", "#4caf50")
+        else:
+            self.log(f"❌ Login failed for: {email}")
+            self.log(f"   Error: {result}")
+            self.update_profile_status(row, "Login failed", "#f44336")
+
+        # Wait for thread to fully finish before removing
+        if thread.isRunning():
+            thread.wait(1000)  # Wait max 1 second
+
+        # Remove thread from active threads
+        if profile_name in self.active_threads:
+            del self.active_threads[profile_name]
+
+        # Check if all threads completed
+        if not self.active_threads:
+            self.log("✅ All login threads completed!")
 
     def update_profile_status(self, row, status_text, color):
         """Update profile status in table"""
