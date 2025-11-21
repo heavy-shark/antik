@@ -633,16 +633,16 @@ class MexcLoginThread(QThread):
                 self.log_signal.emit(f"🌐 Using proxy: {proxy_display}")
 
             try:
-                # Step 0: Setup cursor circle
-                self.cursor_pos = await self.setup_cursor_circle()
-
-                # Step 1: Navigate to login page
+                # Step 1: Navigate to login page FIRST
                 self.log_signal.emit("🌐 Opening MEXC login page...")
                 login_url = "https://www.mexc.com/ru-RU/login?previous=%2Fru-RU%2F"
                 try:
                     await self.page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
                 except PlaywrightTimeoutError:
                     self.log_signal.emit("⚠️ Page load timeout, continuing...")
+
+                # Setup cursor circle AFTER navigation (JS context is fresh after goto)
+                self.cursor_pos = await self.setup_cursor_circle()
 
                 self.log_signal.emit("⏳ Waiting 10 seconds for page to load...")
                 await self.page.wait_for_timeout(10000)
