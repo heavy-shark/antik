@@ -1,1 +1,0 @@
-Moved to https://www.omkar.cloud/botasaurus/docs/botasaurus-desktop/introduction
