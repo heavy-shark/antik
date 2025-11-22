@@ -77,6 +77,15 @@ class MainWindow(QMainWindow):
             QPushButton#settingsBtn:hover {
                 background-color: #2d4a6f;
             }
+            QPushButton#reloadBtn {
+                background-color: #1e3a5f;
+                padding: 8px;
+                font-size: 16px;
+                border-radius: 4px;
+            }
+            QPushButton#reloadBtn:hover {
+                background-color: #2d4a6f;
+            }
             QPushButton#importBtn {
                 background-color: #1976d2;
             }
@@ -254,6 +263,16 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(settings_btn)
 
+        # Reload button (restart app)
+        reload_btn = QPushButton("🔄")
+        reload_btn.setObjectName("reloadBtn")
+        reload_btn.setToolTip("Restart application")
+        reload_btn.clicked.connect(self.restart_app)
+        reload_btn.setFixedWidth(40)
+        reload_btn.setFixedHeight(40)
+
+        layout.addWidget(reload_btn)
+
         return header
 
     def create_profiles_section(self):
@@ -281,13 +300,15 @@ class MainWindow(QMainWindow):
         # Set column widths
         header = self.profiles_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)  # Select
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Email
-        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Proxy
+        header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email
+        header.setSectionResizeMode(2, QHeaderView.Fixed)  # Proxy
         header.setSectionResizeMode(3, QHeaderView.Fixed)  # 2FA Code
         header.setSectionResizeMode(4, QHeaderView.Fixed)  # Status
 
-        self.profiles_table.setColumnWidth(0, 50)  # Select (smaller)
-        self.profiles_table.setColumnWidth(3, 150)  # 2FA Code
+        self.profiles_table.setColumnWidth(0, 50)   # Select (checkbox)
+        self.profiles_table.setColumnWidth(1, 250)  # Email
+        self.profiles_table.setColumnWidth(2, 100)  # Proxy
+        self.profiles_table.setColumnWidth(3, 100)  # 2FA Code
         self.profiles_table.setColumnWidth(4, 100)  # Status
 
         self.profiles_table.setMinimumHeight(250)
@@ -298,13 +319,6 @@ class MainWindow(QMainWindow):
         # Buttons row
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(10)
-
-        # Import button
-        import_btn = QPushButton("📥 Import")
-        import_btn.setObjectName("importBtn")
-        import_btn.clicked.connect(self.import_profiles)
-        import_btn.setFixedWidth(150)
-        buttons_layout.addWidget(import_btn)
 
         buttons_layout.addStretch()
 
@@ -908,6 +922,56 @@ class MainWindow(QMainWindow):
 
     # === BUTTON HANDLERS ===
 
+    def restart_app(self):
+        """Restart the application"""
+        import sys
+        import os
+        from PySide6.QtWidgets import QApplication
+
+        # Confirm restart
+        reply = QMessageBox.question(
+            self,
+            "Restart Application",
+            "Are you sure you want to restart the application?\n\nAll unsaved data will be lost.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        self.log("🔄 Restarting application...")
+
+        # Get the current Python executable and script
+        python = sys.executable
+        script = sys.argv[0]
+
+        # Close all browser threads
+        for profile_name in list(self.active_browser_threads.keys()):
+            try:
+                thread_info = self.active_browser_threads[profile_name]
+                thread = thread_info.get('thread')
+                if thread:
+                    thread.stop()
+                    thread.wait(1000)
+            except:
+                pass
+
+        # Close all trade threads
+        for profile_name in list(self.active_trade_threads.keys()):
+            try:
+                thread_info = self.active_trade_threads[profile_name]
+                thread = thread_info.get('thread')
+                if thread and thread.isRunning():
+                    thread.quit()
+                    thread.wait(1000)
+            except:
+                pass
+
+        # Restart the application
+        QApplication.quit()
+        os.execv(python, [python, script])
+
     def open_settings(self):
         """Open settings dialog"""
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QGroupBox
@@ -955,6 +1019,12 @@ class MainWindow(QMainWindow):
         excel_group = QGroupBox("Excel Tools")
         excel_layout = QVBoxLayout(excel_group)
 
+        # Import button
+        import_btn = QPushButton("📥 Import Profiles")
+        import_btn.setToolTip("Import profiles from Excel file")
+        import_btn.clicked.connect(lambda: self.import_profiles_from_settings(dialog))
+        excel_layout.addWidget(import_btn)
+
         # Generate sample button
         generate_btn = QPushButton("📊 Generate Excel Sample")
         generate_btn.setToolTip("Create a sample Excel file with example profiles")
@@ -962,7 +1032,7 @@ class MainWindow(QMainWindow):
         excel_layout.addWidget(generate_btn)
 
         # Description
-        desc_label = QLabel("Generate a sample Excel file with example data\nto use as a template for importing profiles.")
+        desc_label = QLabel("Import profiles from Excel or generate a sample\nfile to use as a template.")
         desc_label.setStyleSheet("color: #64b5f6; font-size: 11px;")
         excel_layout.addWidget(desc_label)
 
@@ -1049,6 +1119,12 @@ class MainWindow(QMainWindow):
                 "Error",
                 f"Failed to generate sample file:\n{str(e)}"
             )
+
+    def import_profiles_from_settings(self, parent_dialog=None):
+        """Import profiles from settings dialog"""
+        self.import_profiles()
+        # Refresh table after import
+        self.refresh_profiles_table()
 
     def import_profiles(self):
         """Import profiles from Excel"""
