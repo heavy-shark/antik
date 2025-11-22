@@ -12,7 +12,9 @@ from openpyxl import load_workbook
 
 class ProfileManager:
     def __init__(self):
-        self.profiles_dir = Path.home() / ".botasaurus" / "profiles"
+        # Use profiles directory relative to app location
+        app_dir = Path(__file__).parent
+        self.profiles_dir = app_dir / "profiles"
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_file = self.profiles_dir / "profiles_metadata.json"
         self.load_metadata()

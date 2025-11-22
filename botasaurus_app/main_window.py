@@ -15,6 +15,11 @@ from scraper_runner import ScraperRunner, ScraperThread, CheckProxyThread, Manua
 import json
 import pyotp
 import time
+import sqlite3
+import base64
+import os
+import re
+from pathlib import Path
 
 
 class MainWindow(QMainWindow):
@@ -292,9 +297,9 @@ class MainWindow(QMainWindow):
 
         # Profiles table
         self.profiles_table = QTableWidget()
-        self.profiles_table.setColumnCount(5)
+        self.profiles_table.setColumnCount(6)
         self.profiles_table.setHorizontalHeaderLabels([
-            "", "Email", "Proxy", "2FA Code", "Status"
+            "", "Email", "Proxy", "2FA Code", "u_ID", "Status"
         ])
 
         # Set column widths
@@ -303,16 +308,21 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email
         header.setSectionResizeMode(2, QHeaderView.Fixed)  # Proxy
         header.setSectionResizeMode(3, QHeaderView.Fixed)  # 2FA Code
-        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Status
+        header.setSectionResizeMode(4, QHeaderView.Fixed)  # u_ID
+        header.setSectionResizeMode(5, QHeaderView.Fixed)  # Status
 
         self.profiles_table.setColumnWidth(0, 50)   # Select (checkbox)
         self.profiles_table.setColumnWidth(1, 250)  # Email
         self.profiles_table.setColumnWidth(2, 100)  # Proxy
         self.profiles_table.setColumnWidth(3, 100)  # 2FA Code
-        self.profiles_table.setColumnWidth(4, 100)  # Status
+        self.profiles_table.setColumnWidth(4, 70)   # u_ID
+        self.profiles_table.setColumnWidth(5, 100)  # Status
 
         self.profiles_table.setMinimumHeight(250)
         self.profiles_table.setMaximumHeight(350)
+
+        # Connect double-click to copy u_ID
+        self.profiles_table.cellDoubleClicked.connect(self.on_table_double_click)
 
         layout.addWidget(self.profiles_table)
 
@@ -783,11 +793,17 @@ class MainWindow(QMainWindow):
                 totp_item.setFlags(totp_item.flags() & ~Qt.ItemIsEditable)
                 self.profiles_table.setItem(row, 3, totp_item)
 
-            # Column 4: Status
+            # Column 4: u_ID (default: "-")
+            uid_item = QTableWidgetItem("—")
+            uid_item.setForeground(QColor("#90caf9"))
+            uid_item.setFlags(uid_item.flags() & ~Qt.ItemIsEditable)
+            self.profiles_table.setItem(row, 4, uid_item)
+
+            # Column 5: Status
             status_item = QTableWidgetItem("Closed")
             status_item.setForeground(QColor("#ff9800"))
             status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
-            self.profiles_table.setItem(row, 4, status_item)
+            self.profiles_table.setItem(row, 5, status_item)
 
             # Connect checkbox to update delete button visibility
             checkbox.stateChanged.connect(self.update_delete_button_visibility)
@@ -1038,6 +1054,23 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(excel_group)
 
+        # Profile Tools group
+        profile_group = QGroupBox("Profile Tools")
+        profile_layout = QVBoxLayout(profile_group)
+
+        # Execute u_ID button
+        execute_uid_btn = QPushButton("🔑 Execute u_ID")
+        execute_uid_btn.setToolTip("Extract u_ID from cookies for all profiles")
+        execute_uid_btn.clicked.connect(lambda: self.execute_uid_extraction(dialog))
+        profile_layout.addWidget(execute_uid_btn)
+
+        # Description
+        uid_desc_label = QLabel("Extract MEXC u_ID from browser cookies\nfor all profiles in the table.")
+        uid_desc_label.setStyleSheet("color: #64b5f6; font-size: 11px;")
+        profile_layout.addWidget(uid_desc_label)
+
+        layout.addWidget(profile_group)
+
         # Close button
         close_layout = QHBoxLayout()
         close_layout.addStretch()
@@ -1119,6 +1152,153 @@ class MainWindow(QMainWindow):
                 "Error",
                 f"Failed to generate sample file:\n{str(e)}"
             )
+
+    def execute_uid_extraction(self, parent_dialog=None):
+        """Extract u_ID from cookies for all profiles"""
+        from PySide6.QtWidgets import QApplication
+
+        self.log("🔑 Starting u_ID extraction for all profiles...")
+        QApplication.processEvents()
+
+        success_count = 0
+        failed_count = 0
+
+        # Iterate through all rows in the table
+        for row in range(self.profiles_table.rowCount()):
+            email_item = self.profiles_table.item(row, 1)
+            if not email_item:
+                continue
+
+            email = email_item.text()
+
+            # Find profile by email
+            profile_name = None
+            profiles = self.profile_manager.get_all_profiles()
+            for name in profiles:
+                info = self.profile_manager.get_profile_info(name)
+                if info and info.get('email') == email:
+                    profile_name = name
+                    break
+
+            if not profile_name:
+                self.log(f"⚠️ Profile not found for: {email}")
+                failed_count += 1
+                continue
+
+            # Get profile path
+            profile_path = self.profile_manager.get_profile_path(profile_name)
+            if not profile_path:
+                self.log(f"⚠️ Profile path not found for: {email}")
+                failed_count += 1
+                continue
+
+            # Extract u_id
+            uid = self.extract_uid_from_profile(profile_path)
+
+            # Update table
+            uid_item = self.profiles_table.item(row, 4)
+            if uid_item:
+                if uid:
+                    # Truncate for display (first 8 chars)
+                    display_uid = uid[:8] + "..."
+                    uid_item.setText(display_uid)
+                    uid_item.setToolTip(uid)  # Full value in tooltip
+                    uid_item.setForeground(QColor("#4caf50"))
+                    self.log(f"✅ u_ID extracted for: {email}")
+                    success_count += 1
+                else:
+                    uid_item.setText("—")
+                    uid_item.setToolTip("No u_ID found")
+                    uid_item.setForeground(QColor("#90caf9"))
+                    self.log(f"⚠️ No u_ID found for: {email}")
+                    failed_count += 1
+
+            QApplication.processEvents()
+
+        # Summary
+        self.log(f"🔑 u_ID extraction complete: {success_count} found, {failed_count} not found")
+
+        if parent_dialog:
+            QMessageBox.information(
+                parent_dialog,
+                "u_ID Extraction Complete",
+                f"Extraction complete!\n\n✅ Found: {success_count}\n⚠️ Not found: {failed_count}"
+            )
+
+    def extract_uid_from_profile(self, profile_path):
+        """Extract u_ID from profile cookies"""
+        try:
+            profile_path = Path(profile_path)
+
+            # Check if Local State exists (contains encryption key)
+            local_state_path = profile_path / "Local State"
+            if not local_state_path.exists():
+                return None
+
+            # Check if Cookies database exists
+            cookies_path = profile_path / "Default" / "Network" / "Cookies"
+            if not cookies_path.exists():
+                return None
+
+            # Get encryption key from Local State
+            try:
+                with open(local_state_path, 'r', encoding='utf-8') as f:
+                    local_state = json.load(f)
+
+                encrypted_key = base64.b64decode(local_state['os_crypt']['encrypted_key'])
+                encrypted_key = encrypted_key[5:]  # Remove 'DPAPI' prefix
+
+                # Decrypt using Windows DPAPI
+                import win32crypt
+                decryption_key = win32crypt.CryptUnprotectData(encrypted_key, None, None, None, 0)[1]
+            except Exception as e:
+                self.log(f"   ⚠️ Failed to get encryption key: {str(e)}")
+                return None
+
+            # Query cookies database
+            try:
+                conn = sqlite3.connect(str(cookies_path))
+                cursor = conn.cursor()
+                cursor.execute('SELECT encrypted_value FROM cookies WHERE name="u_id" AND host_key=".mexc.com"')
+                result = cursor.fetchone()
+                conn.close()
+
+                if not result:
+                    return None
+
+                encrypted_value = result[0]
+            except Exception as e:
+                self.log(f"   ⚠️ Failed to query cookies: {str(e)}")
+                return None
+
+            # Decrypt cookie value
+            try:
+                from Crypto.Cipher import AES
+
+                nonce = encrypted_value[3:15]
+                ciphertext = encrypted_value[15:-16]
+                tag = encrypted_value[-16:]
+
+                cipher = AES.new(decryption_key, AES.MODE_GCM, nonce=nonce)
+                decrypted_value = cipher.decrypt_and_verify(ciphertext, tag)
+
+                # Extract hex ID from decrypted value
+                decoded = decrypted_value.decode('latin-1')
+                hex_match = re.search(r'[0-9a-f]{64}', decoded)
+
+                if hex_match:
+                    # Return with WEB prefix
+                    return "WEB" + hex_match.group(0)
+                else:
+                    return None
+
+            except Exception as e:
+                self.log(f"   ⚠️ Failed to decrypt cookie: {str(e)}")
+                return None
+
+        except Exception as e:
+            self.log(f"   ⚠️ Error extracting u_ID: {str(e)}")
+            return None
 
     def import_profiles_from_settings(self, parent_dialog=None):
         """Import profiles from settings dialog"""
@@ -1684,9 +1864,26 @@ class MainWindow(QMainWindow):
         if not self.active_trade_threads:
             self.log("✅ All long position threads completed!")
 
+    def on_table_double_click(self, row, column):
+        """Handle double-click on table cells"""
+        from PySide6.QtWidgets import QApplication
+
+        # Column 4 is u_ID - copy to clipboard
+        if column == 4:
+            item = self.profiles_table.item(row, 4)
+            if item:
+                # Get full u_ID from tooltip
+                full_uid = item.toolTip()
+                if full_uid and full_uid != "No u_ID found":
+                    clipboard = QApplication.clipboard()
+                    clipboard.setText(full_uid)
+                    self.log(f"📋 Copied u_ID to clipboard: {full_uid[:20]}...")
+                else:
+                    self.log("⚠️ No u_ID to copy")
+
     def update_profile_status(self, row, status_text, color):
         """Update profile status in table"""
-        status_item = self.profiles_table.item(row, 4)
+        status_item = self.profiles_table.item(row, 5)
         if status_item:
             status_item.setText(status_text)
             status_item.setForeground(QColor(color))
