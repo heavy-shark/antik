@@ -20,6 +20,7 @@ import base64
 import os
 import re
 from pathlib import Path
+from datetime import datetime, timedelta
 
 
 class MainWindow(QMainWindow):
@@ -793,9 +794,29 @@ class MainWindow(QMainWindow):
                 totp_item.setFlags(totp_item.flags() & ~Qt.ItemIsEditable)
                 self.profiles_table.setItem(row, 3, totp_item)
 
-            # Column 4: u_ID (default: "-")
-            uid_item = QTableWidgetItem("—")
-            uid_item.setForeground(QColor("#90caf9"))
+            # Column 4: u_ID (load from saved settings, check expiration)
+            profile_path = self.profile_manager.get_profile_path(profile_name)
+            uid_result = self.check_and_remove_expired_uid(profile_name, profile_path)
+
+            if uid_result:
+                saved_uid, remaining_hours = uid_result
+                # Show saved u_id with remaining time
+                display_uid = saved_uid[:11] + "..."
+                uid_item = QTableWidgetItem(display_uid)
+
+                # Color based on remaining time
+                if remaining_hours < 24:
+                    # Less than 24 hours - orange warning
+                    uid_item.setForeground(QColor("#ff9800"))
+                    uid_item.setToolTip(f"{saved_uid}\n⚠️ Expires in {remaining_hours:.1f}h")
+                else:
+                    # More than 24 hours - green
+                    uid_item.setForeground(QColor("#4caf50"))
+                    uid_item.setToolTip(f"{saved_uid}\n⏱️ {remaining_hours:.1f}h remaining")
+            else:
+                uid_item = QTableWidgetItem("—")
+                uid_item.setToolTip("No u_ID found")
+                uid_item.setForeground(QColor("#90caf9"))
             uid_item.setFlags(uid_item.flags() & ~Qt.ItemIsEditable)
             self.profiles_table.setItem(row, 4, uid_item)
 
@@ -1199,12 +1220,16 @@ class MainWindow(QMainWindow):
             uid_item = self.profiles_table.item(row, 4)
             if uid_item:
                 if uid:
+                    # Save u_id and extraction timestamp to profile settings
+                    self.profile_manager.save_profile_setting(profile_name, 'u_id', uid)
+                    self.profile_manager.save_profile_setting(profile_name, 'u_id_extracted_at', datetime.now().isoformat())
+
                     # Truncate for display (first 8 chars)
-                    display_uid = uid[:8] + "..."
+                    display_uid = uid[:11] + "..."
                     uid_item.setText(display_uid)
                     uid_item.setToolTip(uid)  # Full value in tooltip
                     uid_item.setForeground(QColor("#4caf50"))
-                    self.log(f"✅ u_ID extracted for: {email}")
+                    self.log(f"✅ u_ID extracted & saved for: {email}")
                     success_count += 1
                 else:
                     uid_item.setText("—")
@@ -1299,6 +1324,66 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log(f"   ⚠️ Error extracting u_ID: {str(e)}")
             return None
+
+    def delete_uid_from_cookies(self, profile_path):
+        """Delete u_id cookie from profile's cookie database"""
+        try:
+            profile_path = Path(profile_path)
+            cookies_path = profile_path / "Default" / "Network" / "Cookies"
+
+            if not cookies_path.exists():
+                return False
+
+            # Delete u_id cookie from database
+            conn = sqlite3.connect(str(cookies_path))
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM cookies WHERE name="u_id" AND host_key=".mexc.com"')
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+
+            return deleted > 0
+
+        except Exception as e:
+            self.log(f"   ⚠️ Error deleting cookie: {str(e)}")
+            return False
+
+    def check_and_remove_expired_uid(self, profile_name, profile_path):
+        """Check if u_id is expired (>110 hours) and remove if so"""
+        # Get saved u_id and timestamp
+        saved_uid = self.profile_manager.get_profile_setting(profile_name, 'u_id', None)
+        extracted_at = self.profile_manager.get_profile_setting(profile_name, 'u_id_extracted_at', None)
+
+        if not saved_uid or not extracted_at:
+            return None  # No u_id saved
+
+        # Check if expired (110 hours = 5 days - 10 hours for safety)
+        try:
+            extracted_time = datetime.fromisoformat(extracted_at)
+            expiration_time = extracted_time + timedelta(hours=110)
+
+            if datetime.now() > expiration_time:
+                # Expired! Remove from settings and cookies
+                self.log(f"⏰ u_ID expired for profile, removing...")
+
+                # Delete from cookies
+                self.delete_uid_from_cookies(profile_path)
+
+                # Clear from settings
+                self.profile_manager.save_profile_setting(profile_name, 'u_id', None)
+                self.profile_manager.save_profile_setting(profile_name, 'u_id_extracted_at', None)
+
+                return None  # Return None to indicate expired/removed
+
+            # Calculate remaining hours
+            remaining = expiration_time - datetime.now()
+            remaining_hours = remaining.total_seconds() / 3600
+
+            return saved_uid, remaining_hours
+
+        except Exception as e:
+            self.log(f"   ⚠️ Error checking expiration: {str(e)}")
+            return saved_uid, 0  # Return uid but with 0 hours remaining
 
     def import_profiles_from_settings(self, parent_dialog=None):
         """Import profiles from settings dialog"""

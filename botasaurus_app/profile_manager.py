@@ -88,6 +88,52 @@ class ProfileManager:
             return self.metadata[profile_name]["path"]
         return None
 
+    def save_profile_setting(self, profile_name, key, value):
+        """Save a setting to profile's settings file"""
+        if profile_name not in self.metadata:
+            return False
+
+        profile_path = Path(self.metadata[profile_name]["path"])
+        settings_file = profile_path / "profile_settings.json"
+
+        # Load existing settings or create new
+        settings = {}
+        if settings_file.exists():
+            try:
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            except:
+                settings = {}
+
+        # Update setting
+        settings[key] = value
+
+        # Save settings
+        try:
+            with open(settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2)
+            return True
+        except:
+            return False
+
+    def get_profile_setting(self, profile_name, key, default=None):
+        """Get a setting from profile's settings file"""
+        if profile_name not in self.metadata:
+            return default
+
+        profile_path = Path(self.metadata[profile_name]["path"])
+        settings_file = profile_path / "profile_settings.json"
+
+        if not settings_file.exists():
+            return default
+
+        try:
+            with open(settings_file, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            return settings.get(key, default)
+        except:
+            return default
+
     def import_from_excel(self, excel_path):
         """
         Import profiles from Excel file
