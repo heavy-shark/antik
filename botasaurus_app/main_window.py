@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.profile_manager = ProfileManager()
         self.scraper_runner = ScraperRunner(self.profile_manager)
-        self.version = "v0.2"
+        self.version = "v0.3"
         self.totp_data = {}  # Store TOTP data for each row: {row: secret}
         self.active_threads = {}  # Store active threads (login) by profile name - PARALLEL execution
         self.active_drivers = {}  # Store active Driver instances to prevent garbage collection
@@ -1507,9 +1507,14 @@ class MainWindow(QMainWindow):
         settings = self.get_short_long_settings()
         token_link = settings['token_link']
         position_percent = settings['position_percent']
+        order_type = settings['zaliv_type']  # "Market" or "Limit"
+        limit_price = settings['limit_price']
 
         self.log(f"🔗 Token link: {token_link}")
         self.log(f"📊 Position: {position_percent}%")
+        self.log(f"📋 Order type: {order_type}")
+        if order_type == "Limit":
+            self.log(f"💰 Limit price: {limit_price}")
 
         started_count = 0
 
@@ -1546,6 +1551,8 @@ class MainWindow(QMainWindow):
                 email,
                 token_link,
                 position_percent,
+                order_type=order_type,
+                limit_price=limit_price,
                 headless=False
             )
 

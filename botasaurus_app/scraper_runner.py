@@ -1381,12 +1381,54 @@ class MexcShortThread(QThread):
         """Step 4: Enter limit price in the price input field"""
         self.log_signal.emit(f"💰 Entering limit price: {self.limit_price}")
 
-        # Find the price input field
-        selector = 'input.ant-input[type="text"]'
+        # Find the CORRECT price input field by looking for the container
+        # that has InputNumberHandle_inputOuterWrapper and contains BBO button or "Последняя" text
+        # This ensures we target the price input, not any other text input on the page
 
-        # Click on the input field
+        # JavaScript to find the correct price input
+        find_price_input_js = """
+            // Method 1: Find by InputNumberHandle container that has BBO button
+            var containers = document.querySelectorAll('.InputNumberHandle_inputOuterWrapper__8w_l1');
+            for (var i = 0; i < containers.length; i++) {
+                var container = containers[i];
+                // Check if this container has the BBO button (indicates it's the price input)
+                var bboBtn = container.querySelector('.component_BBOBtn__lhn7Z');
+                if (bboBtn) {
+                    var input = container.querySelector('input.ant-input');
+                    if (input) return input;
+                }
+            }
+
+            // Method 2: Find by container that has "Последняя" text (refresh text)
+            for (var i = 0; i < containers.length; i++) {
+                var container = containers[i];
+                var refreshText = container.querySelector('.component_refreshText__x50if');
+                if (refreshText) {
+                    var input = container.querySelector('input.ant-input');
+                    if (input) return input;
+                }
+            }
+
+            // Method 3: Find by InputNumberExtend_input-main class
+            var inputWrapper = document.querySelector('.InputNumberExtend_input-main__StKNb input.ant-input');
+            if (inputWrapper) return inputWrapper;
+
+            // Method 4: Fallback - find input inside component_newPriceInput parent
+            var priceInputContainer = document.querySelector('.component_newPriceInput__LToiE');
+            if (priceInputContainer) {
+                var parent = priceInputContainer.closest('.InputNumberHandle_inputOuterWrapper__8w_l1');
+                if (parent) {
+                    var input = parent.querySelector('input.ant-input');
+                    if (input) return input;
+                }
+            }
+
+            return null;
+        """
+
+        # Get bounding box of the correct price input
         box = self.driver.run_js(f"""
-            var el = document.querySelector('{selector}');
+            var el = (function() {{ {find_price_input_js} }})();
             if (!el) return null;
             var rect = el.getBoundingClientRect();
             return {{
@@ -1398,7 +1440,7 @@ class MexcShortThread(QThread):
         """)
 
         if not box:
-            raise Exception("Price input field not found")
+            raise Exception("Price input field not found - could not locate InputNumberHandle container with BBO button or Последняя text")
 
         tx = box["x"] + box["width"] / 2
         ty = box["y"] + box["height"] / 2
@@ -1406,30 +1448,50 @@ class MexcShortThread(QThread):
         # Move cursor to input
         self.human_mouse_move((tx, ty), self.MOUSE_MOVE_DURATION_TAB)
 
-        # Click on input
+        # Click on input using the same JS selector
         self.driver.run_js(f"""
-            var el = document.querySelector('{selector}');
+            var el = (function() {{ {find_price_input_js} }})();
             if (el) el.click();
         """)
 
         self.log_signal.emit("⏳ Waiting 1 second...")
         time.sleep(1)
 
-        # Select all text (Ctrl+A) and delete (Backspace)
+        # Select all text (Ctrl+A) using keyboard event simulation
         self.log_signal.emit("🔄 Clearing existing price (Ctrl+A + Backspace)...")
         self.driver.run_js(f"""
-            var el = document.querySelector('{selector}');
+            var el = (function() {{ {find_price_input_js} }})();
             if (el) {{
                 el.focus();
-                el.select();
+
+                // Simulate Ctrl+A (Select All)
+                var ctrlAEvent = new KeyboardEvent('keydown', {{
+                    key: 'a',
+                    code: 'KeyA',
+                    ctrlKey: true,
+                    bubbles: true,
+                    cancelable: true
+                }});
+                el.dispatchEvent(ctrlAEvent);
+                el.select();  // Actually select the text
             }}
         """)
         time.sleep(0.2)
 
-        # Clear the field using native setter
+        # Press Backspace to delete selected text
         self.driver.run_js(f"""
-            var el = document.querySelector('{selector}');
+            var el = (function() {{ {find_price_input_js} }})();
             if (el) {{
+                // Simulate Backspace key
+                var backspaceEvent = new KeyboardEvent('keydown', {{
+                    key: 'Backspace',
+                    code: 'Backspace',
+                    bubbles: true,
+                    cancelable: true
+                }});
+                el.dispatchEvent(backspaceEvent);
+
+                // Clear the field using native setter for React compatibility
                 var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                 nativeInputValueSetter.call(el, '');
                 el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
@@ -1440,13 +1502,19 @@ class MexcShortThread(QThread):
 
         # Type the limit price with human-like behavior
         self.log_signal.emit(f"⌨️ Typing price: {self.limit_price}")
-        self.human_type_price(selector, self.limit_price)
+        self.human_type_price(find_price_input_js, self.limit_price)
 
         self.log_signal.emit("⏳ Waiting 2 seconds...")
         time.sleep(2)
 
-    def human_type_price(self, selector, text, total_time=None):
-        """Type text character by character with random delays - React compatible"""
+    def human_type_price(self, find_element_js, text, total_time=None):
+        """Type text character by character with random delays - React compatible
+
+        Args:
+            find_element_js: JavaScript code that returns the input element
+            text: Text to type
+            total_time: Total time for typing (optional)
+        """
         if total_time is None:
             total_time = self.HUMAN_TYPE_TOTAL_TIME_SEC
         if not text:
@@ -1458,7 +1526,7 @@ class MexcShortThread(QThread):
             # Type single character using native setter for React compatibility
             escaped_char = ch.replace("\\", "\\\\").replace("'", "\\'")
             self.driver.run_js(f"""
-                var el = document.querySelector('{selector}');
+                var el = (function() {{ {find_element_js} }})();
                 if (el) {{
                     // Use native setter to properly trigger React state update
                     var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
@@ -1544,14 +1612,17 @@ class MexcLongThread(QThread):
     MOUSE_MOVE_DURATION_TAB = 1.0
     MOUSE_STEP_INTERVAL_SEC = 0.02
     CURSOR_JITTER_PX = 0.95
+    HUMAN_TYPE_TOTAL_TIME_SEC = 2.0
 
-    def __init__(self, scraper_runner, profile_name, email, token_link, position_percent, headless=False):
+    def __init__(self, scraper_runner, profile_name, email, token_link, position_percent, order_type="Market", limit_price="", headless=False):
         super().__init__()
         self.scraper_runner = scraper_runner
         self.profile_name = profile_name
         self.email = email
         self.token_link = token_link
         self.position_percent = position_percent
+        self.order_type = order_type  # "Market" or "Limit"
+        self.limit_price = limit_price  # Price for Limit orders
         self.headless = headless
         self.row = None
         self.driver = None
@@ -1563,6 +1634,9 @@ class MexcLongThread(QThread):
             self.log_signal.emit(f"📈 Starting MEXC Long position for: {self.email}")
             self.log_signal.emit(f"🔗 Token link: {self.token_link}")
             self.log_signal.emit(f"📊 Position: {self.position_percent}%")
+            self.log_signal.emit(f"📋 Order type: {self.order_type}")
+            if self.order_type == "Limit":
+                self.log_signal.emit(f"💰 Limit price: {self.limit_price}")
 
             # Get proxy for profile
             proxy, proxy_display = self.scraper_runner.get_proxy_for_profile(self.profile_name)
@@ -1591,22 +1665,28 @@ class MexcLongThread(QThread):
             # Step 2: Close popups (up to 10 times)
             self.step_close_popups()
 
-            # Step 3: Click Market tab
-            self.step_click_market_tab()
+            # Step 3: Click Market or Limit tab based on order type
+            if self.order_type == "Limit":
+                self.step_click_limit_tab()
+                # Step 4: Enter limit price
+                self.step_enter_limit_price()
+            else:
+                self.step_click_market_tab()
 
-            # Step 4: Click percentage button
+            # Step 5: Click percentage button
             self.step_click_percentage()
 
-            # Step 5: Click "Открыть Лонг" button
+            # Step 6: Click "Открыть Лонг" button
             self.step_click_open_long()
 
-            self.log_signal.emit(f"🎉 SUCCESS - Long position opened for: {self.email}")
+            self.log_signal.emit(f"🎉 SUCCESS - Long {self.order_type} position opened for: {self.email}")
             self.log_signal.emit("💡 Browser window left open - close manually when done")
 
             result = {
                 "email": self.email,
                 "status": "long_opened",
-                "position": self.position_percent
+                "position": self.position_percent,
+                "order_type": self.order_type
             }
             self.finished.emit(True, result)
 
@@ -1835,8 +1915,185 @@ class MexcLongThread(QThread):
         self.log_signal.emit("⏳ Waiting 2 seconds...")
         time.sleep(2)
 
+    def step_click_limit_tab(self):
+        """Step 3: Click 'Лимит' (Limit) tab"""
+        self.log_signal.emit("📊 Clicking 'Лимит' tab...")
+
+        # Find span with class EntrustTabs_buttonTextOne__Jx1oT and text "Лимит"
+        js_selector = "document.querySelector('span.EntrustTabs_buttonTextOne__Jx1oT') || Array.from(document.querySelectorAll('span')).find(el => el.textContent.trim() === 'Лимит')"
+
+        clicked = self.click_element_by_js(js_selector, self.MOUSE_MOVE_DURATION_TAB)
+
+        if not clicked:
+            raise Exception("'Лимит' tab not found")
+
+        self.log_signal.emit("⏳ Waiting 2 seconds...")
+        time.sleep(2)
+
+    def step_enter_limit_price(self):
+        """Step 4: Enter limit price in the price input field"""
+        self.log_signal.emit(f"💰 Entering limit price: {self.limit_price}")
+
+        # Find the CORRECT price input field by looking for the container
+        # that has InputNumberHandle_inputOuterWrapper and contains BBO button or "Последняя" text
+        # This ensures we target the price input, not any other text input on the page
+
+        # JavaScript to find the correct price input
+        find_price_input_js = """
+            // Method 1: Find by InputNumberHandle container that has BBO button
+            var containers = document.querySelectorAll('.InputNumberHandle_inputOuterWrapper__8w_l1');
+            for (var i = 0; i < containers.length; i++) {
+                var container = containers[i];
+                // Check if this container has the BBO button (indicates it's the price input)
+                var bboBtn = container.querySelector('.component_BBOBtn__lhn7Z');
+                if (bboBtn) {
+                    var input = container.querySelector('input.ant-input');
+                    if (input) return input;
+                }
+            }
+
+            // Method 2: Find by container that has "Последняя" text (refresh text)
+            for (var i = 0; i < containers.length; i++) {
+                var container = containers[i];
+                var refreshText = container.querySelector('.component_refreshText__x50if');
+                if (refreshText) {
+                    var input = container.querySelector('input.ant-input');
+                    if (input) return input;
+                }
+            }
+
+            // Method 3: Find by InputNumberExtend_input-main class
+            var inputWrapper = document.querySelector('.InputNumberExtend_input-main__StKNb input.ant-input');
+            if (inputWrapper) return inputWrapper;
+
+            // Method 4: Fallback - find input inside component_newPriceInput parent
+            var priceInputContainer = document.querySelector('.component_newPriceInput__LToiE');
+            if (priceInputContainer) {
+                var parent = priceInputContainer.closest('.InputNumberHandle_inputOuterWrapper__8w_l1');
+                if (parent) {
+                    var input = parent.querySelector('input.ant-input');
+                    if (input) return input;
+                }
+            }
+
+            return null;
+        """
+
+        # Get bounding box of the correct price input
+        box = self.driver.run_js(f"""
+            var el = (function() {{ {find_price_input_js} }})();
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }};
+        """)
+
+        if not box:
+            raise Exception("Price input field not found - could not locate InputNumberHandle container with BBO button or Последняя text")
+
+        tx = box["x"] + box["width"] / 2
+        ty = box["y"] + box["height"] / 2
+
+        # Move cursor to input
+        self.human_mouse_move((tx, ty), self.MOUSE_MOVE_DURATION_TAB)
+
+        # Click on input using the same JS selector
+        self.driver.run_js(f"""
+            var el = (function() {{ {find_price_input_js} }})();
+            if (el) el.click();
+        """)
+
+        self.log_signal.emit("⏳ Waiting 1 second...")
+        time.sleep(1)
+
+        # Select all text (Ctrl+A) using keyboard event simulation
+        self.log_signal.emit("🔄 Clearing existing price (Ctrl+A + Backspace)...")
+        self.driver.run_js(f"""
+            var el = (function() {{ {find_price_input_js} }})();
+            if (el) {{
+                el.focus();
+
+                // Simulate Ctrl+A (Select All)
+                var ctrlAEvent = new KeyboardEvent('keydown', {{
+                    key: 'a',
+                    code: 'KeyA',
+                    ctrlKey: true,
+                    bubbles: true,
+                    cancelable: true
+                }});
+                el.dispatchEvent(ctrlAEvent);
+                el.select();  // Actually select the text
+            }}
+        """)
+        time.sleep(0.2)
+
+        # Press Backspace to delete selected text
+        self.driver.run_js(f"""
+            var el = (function() {{ {find_price_input_js} }})();
+            if (el) {{
+                // Simulate Backspace key
+                var backspaceEvent = new KeyboardEvent('keydown', {{
+                    key: 'Backspace',
+                    code: 'Backspace',
+                    bubbles: true,
+                    cancelable: true
+                }});
+                el.dispatchEvent(backspaceEvent);
+
+                // Clear the field using native setter for React compatibility
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(el, '');
+                el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+            }}
+        """)
+        time.sleep(0.3)
+
+        # Type the limit price with human-like behavior
+        self.log_signal.emit(f"⌨️ Typing price: {self.limit_price}")
+        self.human_type_price(find_price_input_js, self.limit_price)
+
+        self.log_signal.emit("⏳ Waiting 2 seconds...")
+        time.sleep(2)
+
+    def human_type_price(self, find_element_js, text, total_time=None):
+        """Type text character by character with random delays - React compatible
+
+        Args:
+            find_element_js: JavaScript code that returns the input element
+            text: Text to type
+            total_time: Total time for typing (optional)
+        """
+        if total_time is None:
+            total_time = self.HUMAN_TYPE_TOTAL_TIME_SEC
+        if not text:
+            return
+
+        base_delay = total_time / len(text)
+        for ch in text:
+            delay = random.uniform(base_delay * 0.5, base_delay * 1.5)
+            # Type single character using native setter for React compatibility
+            escaped_char = ch.replace("\\", "\\\\").replace("'", "\\'")
+            self.driver.run_js(f"""
+                var el = (function() {{ {find_element_js} }})();
+                if (el) {{
+                    // Use native setter to properly trigger React state update
+                    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeInputValueSetter.call(el, el.value + '{escaped_char}');
+
+                    // Dispatch events that React listens to
+                    el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+                }}
+            """)
+            time.sleep(delay)
+
     def step_click_percentage(self):
-        """Step 4: Click percentage button (25%, 50%, 75%, or 100%)"""
+        """Step 5: Click percentage button (25%, 50%, 75%, or 100%)"""
         percent = self.position_percent
 
         # Map percentage to left style value
